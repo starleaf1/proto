@@ -1,0 +1,45 @@
+{
+  "name": "proto",
+  "author": "MakeAwesomeHappen",
+  "version": "1.0.0",
+  "keywords": ["pebble-app"],
+  "private": true,
+  "dependencies": {},
+  "pebble": {
+    "displayName": "proto",
+    "uuid": "f2fc68a6-9636-4694-929b-73c11c33f0e4",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "targetPlatforms": [
+      "aplite",
+      "basalt",
+      "chalk",
+      "diorite",
+      "emery",
+      "flint",
+      "gabbro"
+    ],
+    "watchapp": {
+      "watchface": true
+    },
+    "messageKeys": [
+      "UnreadCount"
+    ],
+    "resources": {
+      "media": [
+        {
+          "type": "font",
+          "name": "ORBITRON_54",
+          "file": "fonts/orbitron.ttf",
+          "characterRegex": "[0-9]"
+        },
+        {
+          "type": "font",
+          "name": "RAJDHANI_LIGHT_22",
+          "file": "fonts/rajdhani_light.ttf",
+          "characterRegex": "[A-Z0-9 ]"
+        }
+      ]
+    }
+  }
+}
