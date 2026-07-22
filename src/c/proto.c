@@ -249,11 +249,24 @@ static void root_update_proc(Layer *layer, GContext *ctx) {
                      GTextOverflowModeFill, GTextAlignmentCenter, NULL);
 
   // 5. Icon row — battery / envelope / bluetooth, always all rendered.
+  // Each glyph has a different width (and the battery/bluetooth are drawn
+  // off-center from their own point), so equal center spacing leaves bluetooth
+  // adrift. Instead lay them out by their true left/right visual extents with a
+  // uniform gap, then center the whole group's span on c.x.
   int16_t icon_cy = c.y + (R * 3) / 5;
-  int16_t spread  = (R * 2) / 5;
-  draw_battery(ctx,   GPoint(c.x - spread, icon_cy), R / 7,  R / 16);
-  draw_envelope(ctx,  GPoint(c.x,          icon_cy), R / 8,  R / 12);
-  draw_bluetooth(ctx, GPoint(c.x + spread, icon_cy), R / 12, R / 8);
+  int16_t batt_hw = R / 7,  env_hw = R / 8,  bt_hw = R / 12;
+  int16_t batt_l = batt_hw, batt_r = batt_hw + 2;  // +2px terminal nub on the right
+  int16_t env_l  = env_hw,  env_r  = env_hw;
+  int16_t bt_l   = bt_hw / 2, bt_r = bt_hw;         // rune extends less to its left
+  int16_t gap = R / 6;
+  int16_t total = batt_l + batt_r + gap + env_l + env_r + gap + bt_l + bt_r;
+  int16_t x = c.x - total / 2;                      // left edge of the centered row
+  int16_t batt_cx = x + batt_l;  x += batt_l + batt_r + gap;
+  int16_t env_cx  = x + env_l;   x += env_l + env_r + gap;
+  int16_t bt_cx   = x + bt_l;
+  draw_battery(ctx,   GPoint(batt_cx, icon_cy), batt_hw, R / 16);
+  draw_envelope(ctx,  GPoint(env_cx,  icon_cy), env_hw,  R / 12);
+  draw_bluetooth(ctx, GPoint(bt_cx,   icon_cy), bt_hw,   R / 8);
 }
 
 // ---------------------------------------------------------------------------
