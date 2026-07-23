@@ -107,6 +107,22 @@ static void update_buffers(void) {
 // Icons
 // ---------------------------------------------------------------------------
 
+// Knock an already-drawn icon back to a barely-visible ghost. Pebble has no
+// true alpha for fills/lines and only four grays, so "fainter than light gray"
+// means dithering: erase most of the icon's pixels to white in a regular grid,
+// leaving a sparse stipple. Works the same on color and B&W. Call after drawing
+// the icon, over a rect that covers it (padding into white background is a
+// no-op, so the rect can be generous).
+static void fade_icon(GContext *ctx, GRect r) {
+  graphics_context_set_stroke_color(ctx, GColorWhite);
+  for (int16_t y = r.origin.y; y < r.origin.y + r.size.h; y++) {
+    for (int16_t x = r.origin.x; x < r.origin.x + r.size.w; x++) {
+      if ((x & 1) && (y & 1)) continue;         // keep 1 px per 2x2 block (~25%)
+      graphics_draw_pixel(ctx, GPoint(x, y));
+    }
+  }
+}
+
 static void draw_battery(GContext *ctx, GPoint cp, int16_t hw, int16_t hh) {
   GRect body = GRect(cp.x - hw, cp.y - hh, 2 * hw, 2 * hh);
   // outline + terminal nub (always black)
@@ -153,16 +169,26 @@ static void draw_envelope(GContext *ctx, GPoint cp, int16_t hw, int16_t hh) {
     graphics_draw_rect(ctx, body);
 #endif
   }
+  // Flap — a touch bolder than the body, scaling up on higher-res displays.
+  int16_t fw = hw / 4;
+  if (fw < 1) fw = 1;
+  graphics_context_set_stroke_width(ctx, fw);
   graphics_draw_line(ctx, tl, mid);
   graphics_draw_line(ctx, tr, mid);
+  if (!lit) {                                  // barely-visible when no unread
+    fade_icon(ctx, GRect(body.origin.x - fw, body.origin.y - fw,
+                          body.size.w + 2 * fw, body.size.h + 2 * fw));
+  }
 }
 
 static void draw_bluetooth(GContext *ctx, GPoint cp, int16_t hw, int16_t hh) {
   bool lit = !s_connected;
   GColor col;
-  uint8_t sw = lit ? 2 : 1;
+  uint8_t sw = hh / 5;         // stroke scales with the icon (thicker on hi-res)
+  if (sw < 1) sw = 1;
+  if (lit) sw += 1;            // disconnected reads bolder
 #ifdef PBL_COLOR
-  col = lit ? GColorBlack : GColorLightGray;
+  col = lit ? GColorRed : GColorLightGray;   // red = "warning" when disconnected
 #else
   col = GColorBlack;
 #endif
@@ -185,6 +211,20 @@ static void draw_bluetooth(GContext *ctx, GPoint cp, int16_t hw, int16_t hh) {
   graphics_draw_line(ctx, P, Lq);
   graphics_draw_line(ctx, B, Q);
   graphics_draw_line(ctx, Q, Lp);
+
+  // Exclamation mark right of the rune — always present (root_update_proc
+  // reserves its slot so the row stays centered). Warning color + bold when
+  // disconnected; faded along with the rune when connected.
+  int16_t ex_cx  = cp.x + hw + hw / 2;        // sits in the reserved slot
+  int16_t bw     = sw + 1;                    // stem a touch bolder than the rune
+  int16_t stem_h = (hh * 6) / 5;              // stem from the top, ~60% of full height
+  graphics_context_set_fill_color(ctx, col);
+  graphics_fill_rect(ctx, GRect(ex_cx - bw / 2, cp.y - hh, bw, stem_h), 0, GCornerNone);
+  graphics_fill_circle(ctx, GPoint(ex_cx, cp.y + hh - bw), bw / 2 + 1);
+
+  if (!lit) {                                 // barely-visible when connected
+    fade_icon(ctx, GRect(cp.x - lw - 1, cp.y - hh - 1, 2 * hw + 4, 2 * hh + 2));
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -257,7 +297,7 @@ static void root_update_proc(Layer *layer, GContext *ctx) {
   int16_t batt_hw = R / 7,  env_hw = R / 8,  bt_hw = R / 12;
   int16_t batt_l = batt_hw, batt_r = batt_hw + 2;  // +2px terminal nub on the right
   int16_t env_l  = env_hw,  env_r  = env_hw;
-  int16_t bt_l   = bt_hw / 2, bt_r = bt_hw;         // rune extends less to its left
+  int16_t bt_l   = bt_hw / 2, bt_r = bt_hw + bt_hw; // rune + always-present "!" to its right
   int16_t gap = R / 6;
   int16_t total = batt_l + batt_r + gap + env_l + env_r + gap + bt_l + bt_r;
   int16_t x = c.x - total / 2;                      // left edge of the centered row
