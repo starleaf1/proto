@@ -1,36 +1,66 @@
 # proto
 
-A Pebble watchapp/watchface written in C using the Pebble SDK.
+A Pebble watchface and its phone-side companion, developed together in one
+repository.
 
-## Building & running
+The watchface shows the time, date, battery, Bluetooth-connection state, an
+**unread-message envelope**, and a **missed-call** indicator. Pebble exposes no
+on-watch API for a phone's notification count or call history, so those numbers
+are pushed to the watch by a companion app over Bluetooth. The companion is
+moving from a PebbleKit JS stub to a native **Android** app — this repo now
+houses both sides.
+
+## Repository layout
+
+| Path          | What it is                                                                 |
+| ------------- | -------------------------------------------------------------------------- |
+| `watchface/`  | The Pebble watchapp — C, built with the Pebble SDK.                        |
+| `android/`    | The Android companion app (planned; sends `UnreadCount` and `MissedCount`). |
+| `docs/`       | [Architecture](docs/architecture.md) and the [protocol contract](docs/protocol.md). |
+| `CONTRIBUTING.md` | Dev environment setup and conventions.                                 |
+
+## How the two sides talk
+
+Everything the watch and phone exchange rides on two Pebble AppMessage keys:
+
+| Field        | Value                                    |
+| ------------ | ---------------------------------------- |
+| App UUID     | `f2fc68a6-9636-4694-929b-73c11c33f0e4`   |
+| Message keys | `UnreadCount`, `MissedCount` — non-negative `int32` |
+| Direction    | phone → watch                            |
+| Behaviour    | `0` leaves the matching icon unlit; `> 0` lights it |
+
+That's the whole integration surface. Full details — buffer sizes, delivery
+semantics, and the PebbleKit Android call to send the value — are in
+[docs/protocol.md](docs/protocol.md).
+
+## Quick start
+
+### Watchface (Pebble)
+
+Requires the [Pebble SDK](https://developer.repebble.com). Run all commands from
+`watchface/`:
 
 ```sh
-pebble build                          # build for all targetPlatforms
-pebble install --emulator emery       # install on the emery emulator
+cd watchface
+pebble build                          # build for all target platforms
+pebble install --emulator emery       # run in the emery emulator
 pebble install --phone <ip>           # install to a paired phone
 ```
 
-## Target platforms
+See [watchface/CLAUDE.md](watchface/CLAUDE.md) for the full command reference
+(emulator control, screenshots, headless/VNC usage).
 
-`targetPlatforms` in `package.json` controls which watches you build for. The
-modern Pebble hardware is **emery** (Pebble Time 2), **gabbro** (Pebble Round
-2), and **flint** (Pebble 2 Duo); the original Pebble platforms (aplite,
-basalt, chalk, diorite) are included by default for backwards compatibility.
+### Android companion
 
-## Project layout
-
-```
-src/c/           C source for the watchapp
-src/pkjs/        PebbleKit JS (phone-side) source, if any
-worker_src/c/    Background worker source, if any
-resources/       Images, fonts, and other bundled resources
-package.json     Project metadata (UUID, platforms, resources, message keys)
-wscript          Build rules — usually no need to edit
-```
-
-By default this project is configured as a watchapp. To make it a watchface,
-set `pebble.watchapp.watchface` to `true` in `package.json`.
+Scaffolding lands under `android/`. It will use
+[PebbleKit Android](https://developer.repebble.com/guides/communication/using-pebblekit-android/)
+to send `UnreadCount` and `MissedCount` to the watch. Build steps will be
+documented here and in `android/README.md` once the module exists.
 
 ## Documentation
 
-Full SDK docs, tutorials, and API reference: <https://developer.repebble.com>
+- [docs/architecture.md](docs/architecture.md) — components and data flow
+- [docs/protocol.md](docs/protocol.md) — the AppMessage contract in full
+- [CONTRIBUTING.md](CONTRIBUTING.md) — how to set up and contribute
+- Pebble SDK reference — <https://developer.repebble.com>

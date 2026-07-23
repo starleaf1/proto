@@ -5,9 +5,10 @@
 //
 // Big hour numeral above center, a 60-tick dial hugging the watch edge, and a
 // small radial minute pointer whose tip sits a consistent 1px inside the dial.
-// Day/date/month on a lighter line below, and a bottom row of three status
-// icons (battery / unread message / bluetooth). Sporty 2000s-futurism vibe:
-// electric-blue highlight, techno-geometric Orbitron hour, tach-style dial.
+// A battery gauge rides just above the hour. Day/date/month on a lighter line
+// below, and a bottom row of three status icons (missed call / unread message /
+// bluetooth). Sporty 2000s-futurism vibe: electric-blue highlight,
+// techno-geometric Orbitron hour, tach-style dial.
 //
 // All geometry derives from the root layer's bounds so it adapts to every
 // target platform (rectangular + round, B&W + color) with no hardcoded sizes.
@@ -25,6 +26,7 @@ static struct tm         s_now;
 static BatteryChargeState s_batt;
 static bool               s_connected = true;
 static int                s_unread = 0;   // fed by companion via AppMessage; 0 = unlit
+static int                s_missed = 0;   // fed by companion via AppMessage; 0 = unlit
 
 static char s_hour_buf[4];   // "23" / "9"
 static char s_date_buf[24];  // "MON 22 JUL"
@@ -148,6 +150,42 @@ static void draw_battery(GContext *ctx, GPoint cp, int16_t hw, int16_t hh) {
   }
 }
 
+// Missed-call indicator — the Material Design "call" handset, traced as a
+// filled polygon: earpiece top-left, mouthpiece bottom-right, joined by a
+// diagonal grip with a concave inner edge. Lit (a call was missed) fills bold
+// red on color / black on B&W; unlit fades to a ghost like the other icons.
+static void draw_missed_call(GContext *ctx, GPoint cp, int16_t hw, int16_t hh) {
+  bool lit = s_missed > 0;
+  GColor col;
+#ifdef PBL_COLOR
+  col = lit ? GColorRed : GColorLightGray;   // red = missed-call alert
+#else
+  col = GColorBlack;
+#endif
+  // Outline of Material's `call` glyph in a grid centred on the icon and spanning
+  // ~±36; scaled to the box at runtime (denominator < 48 makes it fill more).
+  static const int8_t PTS[][2] = {
+    {-22,-5}, {-13, 6}, {-5,15}, { 5,22}, {14,13}, {18,12}, {25,12}, {32,14},
+    {36,18}, {36,32}, {32,36}, { 6,31}, {-16,16}, {-31,-6}, {-36,-32}, {-32,-36},
+    {-18,-36}, {-14,-32}, {-12,-18}, {-13,-14}
+  };
+  const int16_t D = 42;
+  GPoint pts[sizeof(PTS) / sizeof(PTS[0])];
+  for (unsigned i = 0; i < sizeof(PTS) / sizeof(PTS[0]); i++) {
+    pts[i] = GPoint(cp.x + (int16_t)((int32_t)PTS[i][0] * hw / D),
+                    cp.y + (int16_t)((int32_t)PTS[i][1] * hh / D));
+  }
+  GPathInfo info = { .num_points = sizeof(PTS) / sizeof(PTS[0]), .points = pts };
+  GPath *path = gpath_create(&info);
+  graphics_context_set_fill_color(ctx, col);
+  gpath_draw_filled(ctx, path);
+  gpath_destroy(path);
+
+  if (!lit) {                                // barely-visible when nothing missed
+    fade_icon(ctx, GRect(cp.x - hw - 2, cp.y - hh - 2, 2 * (hw + 2), 2 * (hh + 2)));
+  }
+}
+
 static void draw_envelope(GContext *ctx, GPoint cp, int16_t hw, int16_t hh) {
   bool lit = s_unread > 0;
   GRect body = GRect(cp.x - hw, cp.y - hh, 2 * hw, 2 * hh);
@@ -265,6 +303,12 @@ static void root_update_proc(Layer *layer, GContext *ctx) {
   graphics_draw_text(ctx, s_hour_buf, s_hour_font, hour_box,
                      GTextOverflowModeFill, GTextAlignmentCenter, NULL);
 
+  // 2b. Battery gauge — centered just above the hour numeral. The -1 x nudge
+  // re-centers the icon against its 2px terminal nub.
+  int16_t batt_hw = R / 7, batt_hh = R / 16;
+  int16_t batt_cy = hour_box.origin.y - batt_hh - 3;
+  draw_battery(ctx, GPoint(c.x - 1, batt_cy), batt_hw, batt_hh);
+
   // 3. Minute pointer — radial arrow, apex 1px inside the tick inner-ends.
   int32_t a_min = TRIG_MAX_ANGLE * s_now.tm_min / 60;
   int32_t plen = (R * 2) / 9;   // pointer length toward center
@@ -288,25 +332,25 @@ static void root_update_proc(Layer *layer, GContext *ctx) {
   graphics_draw_text(ctx, s_date_buf, s_date_font, date_box,
                      GTextOverflowModeFill, GTextAlignmentCenter, NULL);
 
-  // 5. Icon row — battery / envelope / bluetooth, always all rendered.
-  // Each glyph has a different width (and the battery/bluetooth are drawn
-  // off-center from their own point), so equal center spacing leaves bluetooth
-  // adrift. Instead lay them out by their true left/right visual extents with a
-  // uniform gap, then center the whole group's span on c.x.
+  // 5. Icon row — missed call / envelope / bluetooth, always all rendered.
+  // Each glyph has a different width (and bluetooth is drawn off-center from
+  // its own point), so equal center spacing leaves bluetooth adrift. Instead
+  // lay them out by their true left/right visual extents with a uniform gap,
+  // then center the whole group's span on c.x.
   int16_t icon_cy = c.y + (R * 3) / 5;
-  int16_t batt_hw = R / 7,  env_hw = R / 8,  bt_hw = R / 12;
-  int16_t batt_l = batt_hw, batt_r = batt_hw + 2;  // +2px terminal nub on the right
-  int16_t env_l  = env_hw,  env_r  = env_hw;
-  int16_t bt_l   = bt_hw / 2, bt_r = bt_hw + bt_hw; // rune + always-present "!" to its right
+  int16_t mc_hw = R / 8,   env_hw = R / 8,  bt_hw = R / 12;
+  int16_t mc_l  = mc_hw,   mc_r  = mc_hw;
+  int16_t env_l = env_hw,  env_r = env_hw;
+  int16_t bt_l  = bt_hw / 2, bt_r = bt_hw + bt_hw;  // rune + always-present "!" to its right
   int16_t gap = R / 6;
-  int16_t total = batt_l + batt_r + gap + env_l + env_r + gap + bt_l + bt_r;
-  int16_t x = c.x - total / 2;                      // left edge of the centered row
-  int16_t batt_cx = x + batt_l;  x += batt_l + batt_r + gap;
-  int16_t env_cx  = x + env_l;   x += env_l + env_r + gap;
-  int16_t bt_cx   = x + bt_l;
-  draw_battery(ctx,   GPoint(batt_cx, icon_cy), batt_hw, R / 16);
-  draw_envelope(ctx,  GPoint(env_cx,  icon_cy), env_hw,  R / 12);
-  draw_bluetooth(ctx, GPoint(bt_cx,   icon_cy), bt_hw,   R / 8);
+  int16_t total = mc_l + mc_r + gap + env_l + env_r + gap + bt_l + bt_r;
+  int16_t x = c.x - total / 2;                       // left edge of the centered row
+  int16_t mc_cx  = x + mc_l;   x += mc_l + mc_r + gap;
+  int16_t env_cx = x + env_l;  x += env_l + env_r + gap;
+  int16_t bt_cx  = x + bt_l;
+  draw_missed_call(ctx, GPoint(mc_cx,  icon_cy), mc_hw,  R / 8);
+  draw_envelope(ctx,    GPoint(env_cx, icon_cy), env_hw, R / 12);
+  draw_bluetooth(ctx,   GPoint(bt_cx,  icon_cy), bt_hw,  R / 8);
 }
 
 // ---------------------------------------------------------------------------
@@ -330,11 +374,12 @@ static void conn_handler(bool connected) {
 }
 
 static void inbox_received(DictionaryIterator *iter, void *ctx) {
+  bool dirty = false;
   Tuple *u = dict_find(iter, MESSAGE_KEY_UnreadCount);
-  if (u) {
-    s_unread = u->value->int32;
-    layer_mark_dirty(s_root_layer);
-  }
+  if (u) { s_unread = u->value->int32; dirty = true; }   // drives the envelope
+  Tuple *m = dict_find(iter, MESSAGE_KEY_MissedCount);
+  if (m) { s_missed = m->value->int32; dirty = true; }   // drives the missed-call icon
+  if (dirty) layer_mark_dirty(s_root_layer);
 }
 
 // ---------------------------------------------------------------------------

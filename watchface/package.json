@@ -23,7 +23,8 @@
       "watchface": true
     },
     "messageKeys": [
-      "UnreadCount"
+      "UnreadCount",
+      "MissedCount"
     ],
     "resources": {
       "media": [
