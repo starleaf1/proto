@@ -3,12 +3,13 @@
 // ---------------------------------------------------------------------------
 // proto — "Eclipse" watchface
 //
-// Big hour numeral above center, a 60-tick dial hugging the watch edge, and a
-// small radial minute pointer whose tip sits a consistent 1px inside the dial.
-// A battery gauge rides just above the hour. Day/date/month on a lighter line
-// below, and a bottom row of three status icons (missed call / unread message /
-// bluetooth). Sporty 2000s-futurism vibe: electric-blue highlight,
-// techno-geometric Orbitron hour, tach-style dial.
+// Big minute numeral above center, a 60-tick dial hugging the watch edge, and a
+// small radial hour hand whose tip sits a consistent 1px inside the dial. The
+// hand sweeps like an analog clock's — at 4:30 it points midway between the 4
+// and 5 marks. A battery gauge rides just above the numeral. Day/date/month on a
+// lighter line below, and a bottom row of three status icons (missed call /
+// unread message / bluetooth). Sporty 2000s-futurism vibe: electric-blue
+// highlight, techno-geometric Orbitron numeral, tach-style dial.
 //
 // All geometry derives from the root layer's bounds so it adapts to every
 // target platform (rectangular + round, B&W + color) with no hardcoded sizes.
@@ -18,7 +19,7 @@
 
 static Window *s_window;
 static Layer  *s_root_layer;
-static GFont   s_hour_font;
+static GFont   s_num_font;
 static GFont   s_date_font;
 static bool    s_custom_fonts = false;   // true if TTFs loaded (so we unload them)
 
@@ -28,7 +29,7 @@ static bool               s_connected = true;
 static int                s_unread = 0;   // fed by companion via AppMessage; 0 = unlit
 static int                s_missed = 0;   // fed by companion via AppMessage; 0 = unlit
 
-static char s_hour_buf[4];   // "23" / "9"
+static char s_min_buf[4];    // "05" / "30"
 static char s_date_buf[24];  // "MON 22 JUL"
 
 // ---------------------------------------------------------------------------
@@ -90,15 +91,9 @@ static void fill_triangle(GContext *ctx, GPoint a, GPoint b, GPoint c) {
 // ---------------------------------------------------------------------------
 
 static void update_buffers(void) {
-  if (clock_is_24h_style()) {
-    strftime(s_hour_buf, sizeof(s_hour_buf), "%H", &s_now);
-  } else {
-    strftime(s_hour_buf, sizeof(s_hour_buf), "%I", &s_now);
-  }
-  if (s_hour_buf[0] == '0') {            // strip leading zero on the big numeral
-    s_hour_buf[0] = s_hour_buf[1];
-    s_hour_buf[1] = s_hour_buf[2];
-  }
+  // Big numeral = minutes, zero-padded ("05", "30"). Same in 12h/24h, so no
+  // clock-style branching; the hour hand carries the hour instead.
+  strftime(s_min_buf, sizeof(s_min_buf), "%M", &s_now);
   strftime(s_date_buf, sizeof(s_date_buf), "%a %d %b", &s_now);
   for (char *p = s_date_buf; *p; p++) {  // uppercase in place (matches font subset)
     if (*p >= 'a' && *p <= 'z') *p -= 32;
@@ -283,41 +278,45 @@ static void root_update_proc(Layer *layer, GContext *ctx) {
   int32_t tick_len = R / 9;
   if (tick_len < 6) tick_len = 6;
 
-  // 1. Dial: 60 radial ticks, uniform length; multiples of 5 are thicker.
+  // 1. Dial: 60 radial ticks; multiples of 5 are thicker, and every marker
+  // except the four quarters (00/15/30/45) runs 25% shorter.
   graphics_context_set_stroke_color(ctx, GColorBlack);
   for (int i = 0; i < 60; i++) {
     int32_t a = TRIG_MAX_ANGLE * i / 60;
+    int32_t len = (i % 15 == 0) ? tick_len : (tick_len * 75) / 100;
     GPoint outer = dial_boundary(dial, c, a);
-    GPoint inner = step_in(outer, a, tick_len);
+    GPoint inner = step_in(outer, a, len);
     graphics_context_set_stroke_width(ctx, (i % 5 == 0) ? 3 : 1);
     graphics_draw_line(ctx, outer, inner);
   }
 
-  // 2. Hour numeral — highlight color, centered, slightly above middle.
+  // 2. Minute numeral — highlight color, centered, slightly above middle.
   GRect  m = GRect(0, 0, b.size.w, b.size.h);
-  GSize  hs = graphics_text_layout_get_content_size(s_hour_buf, s_hour_font, m,
+  GSize  ns = graphics_text_layout_get_content_size(s_min_buf, s_num_font, m,
                                                      GTextOverflowModeFill, GTextAlignmentCenter);
-  int16_t hour_cy = c.y - R / 6;
-  GRect  hour_box = GRect(0, hour_cy - hs.h / 2, b.size.w, hs.h + 6);
+  int16_t num_cy = c.y - R / 6;
+  GRect  num_box = GRect(0, num_cy - ns.h / 2, b.size.w, ns.h + 6);
   graphics_context_set_text_color(ctx, hi);
-  graphics_draw_text(ctx, s_hour_buf, s_hour_font, hour_box,
+  graphics_draw_text(ctx, s_min_buf, s_num_font, num_box,
                      GTextOverflowModeFill, GTextAlignmentCenter, NULL);
 
-  // 2b. Battery gauge — centered just above the hour numeral. The -1 x nudge
+  // 2b. Battery gauge — centered just above the minute numeral. The -1 x nudge
   // re-centers the icon against its 2px terminal nub.
   int16_t batt_hw = R / 7, batt_hh = R / 16;
-  int16_t batt_cy = hour_box.origin.y - batt_hh - 3;
+  int16_t batt_cy = num_box.origin.y - batt_hh - 3;
   draw_battery(ctx, GPoint(c.x - 1, batt_cy), batt_hw, batt_hh);
 
-  // 3. Minute pointer — radial arrow, apex 1px inside the tick inner-ends.
-  int32_t a_min = TRIG_MAX_ANGLE * s_now.tm_min / 60;
+  // 3. Hour hand — radial arrow, apex 1px inside the tick inner-ends. Sweeps
+  // like an analog clock: the 12-hour mark plus the fraction of the hour already
+  // elapsed, so at 4:30 the tip sits midway between the 4 and 5 marks.
+  int32_t a_hour = TRIG_MAX_ANGLE * ((s_now.tm_hour % 12) * 60 + s_now.tm_min) / (12 * 60);
   int32_t plen = (R * 2) / 9;   // pointer length toward center
   int32_t phw  = R / 12;        // half-width at the base
   if (phw < 5) phw = 5;
-  GPoint apex = step_in(dial_boundary(dial, c, a_min), a_min, tick_len + 1);
-  GPoint base = step_in(apex, a_min, plen);
-  int32_t perp_x = cos_lookup(a_min);   // perpendicular to the ray
-  int32_t perp_y = sin_lookup(a_min);
+  GPoint apex = step_in(dial_boundary(dial, c, a_hour), a_hour, tick_len + 1);
+  GPoint base = step_in(apex, a_hour, plen);
+  int32_t perp_x = cos_lookup(a_hour);   // perpendicular to the ray
+  int32_t perp_y = sin_lookup(a_hour);
   GPoint b1 = GPoint(base.x + (int16_t)(perp_x * phw / TRIG_MAX_RATIO),
                      base.y + (int16_t)(perp_y * phw / TRIG_MAX_RATIO));
   GPoint b2 = GPoint(base.x - (int16_t)(perp_x * phw / TRIG_MAX_RATIO),
@@ -325,8 +324,8 @@ static void root_update_proc(Layer *layer, GContext *ctx) {
   graphics_context_set_fill_color(ctx, hi);
   fill_triangle(ctx, apex, b1, b2);
 
-  // 4. Date line — lighter font, black, under the hour.
-  int16_t date_y = hour_box.origin.y + hs.h - 2;
+  // 4. Date line — lighter font, black, under the numeral.
+  int16_t date_y = num_box.origin.y + ns.h - 2;
   GRect  date_box = GRect(0, date_y, b.size.w, 26);
   graphics_context_set_text_color(ctx, GColorBlack);
   graphics_draw_text(ctx, s_date_buf, s_date_font, date_box,
@@ -399,12 +398,12 @@ static void window_unload(Window *window) {
 
 static void init(void) {
   // Fonts: custom TTFs, falling back to system fonts if resources are absent.
-  s_hour_font = fonts_load_custom_font(resource_get_handle(RESOURCE_ID_ORBITRON_54));
+  s_num_font = fonts_load_custom_font(resource_get_handle(RESOURCE_ID_ORBITRON_54));
   s_date_font = fonts_load_custom_font(resource_get_handle(RESOURCE_ID_RAJDHANI_LIGHT_22));
-  if (s_hour_font && s_date_font) {
+  if (s_num_font && s_date_font) {
     s_custom_fonts = true;
   } else {
-    s_hour_font = fonts_get_system_font(FONT_KEY_LECO_42_NUMBERS);
+    s_num_font = fonts_get_system_font(FONT_KEY_LECO_42_NUMBERS);
     s_date_font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
   }
 
@@ -439,7 +438,7 @@ static void deinit(void) {
   battery_state_service_unsubscribe();
   connection_service_unsubscribe();
   if (s_custom_fonts) {
-    fonts_unload_custom_font(s_hour_font);
+    fonts_unload_custom_font(s_num_font);
     fonts_unload_custom_font(s_date_font);
   }
   window_destroy(s_window);
