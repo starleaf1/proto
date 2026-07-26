@@ -398,7 +398,7 @@ static void window_unload(Window *window) {
 
 static void init(void) {
   // Fonts: custom TTFs, falling back to system fonts if resources are absent.
-  s_num_font = fonts_load_custom_font(resource_get_handle(RESOURCE_ID_ORBITRON_54));
+  s_num_font = fonts_load_custom_font(resource_get_handle(RESOURCE_ID_ORBITRON_43));
   s_date_font = fonts_load_custom_font(resource_get_handle(RESOURCE_ID_RAJDHANI_LIGHT_22));
   if (s_num_font && s_date_font) {
     s_custom_fonts = true;

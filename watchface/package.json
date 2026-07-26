@@ -30,7 +30,7 @@
       "media": [
         {
           "type": "font",
-          "name": "ORBITRON_54",
+          "name": "ORBITRON_43",
           "file": "fonts/orbitron.ttf",
           "characterRegex": "[0-9]"
         },
