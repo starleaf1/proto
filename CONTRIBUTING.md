@@ -9,7 +9,7 @@ together.
 ```
 proto/
   watchface/   Pebble watchapp (C, Pebble SDK)
-  android/     Android companion (planned)
+  pipe/        Android companion (scaffolded)
   docs/        Architecture + protocol contract
 ```
 
@@ -34,11 +34,21 @@ full command reference and emulator-button control.
 **Verify UI changes with a screenshot.** After changing anything visual, build,
 install, and screenshot the emulator before considering the change done.
 
-## Android companion (`android/`)
+## Android companion (`pipe/`)
 
-Scaffolding is not committed yet. When it lands it will build with Gradle
-(`./gradlew assembleDebug`) and use PebbleKit Android to send `UnreadCount` to
-the watch. Add build/setup steps to `android/README.md` as the module grows.
+**Prerequisites:** JDK 21 and the Android SDK. Run all Gradle commands from
+`pipe/`:
+
+```sh
+cd pipe
+./gradlew assembleDebug           # build the debug APK
+./gradlew test                    # unit tests
+```
+
+The module is Android Studio scaffolding today — it does not yet implement the
+protocol. Use PebbleKit Android to send `UnreadCount` and `MissedCount` to the
+watch. Keep build/setup steps in [pipe/README.md](pipe/README.md) as the module
+grows.
 
 ## The protocol
 
@@ -47,7 +57,7 @@ The watch and phone share a single AppMessage key documented in
 or its numeric id, the value type, or the AppMessage buffer sizes:
 
 1. Update [docs/protocol.md](docs/protocol.md).
-2. Change **both** `watchface/` and `android/` in the same commit/PR.
+2. Change **both** `watchface/` and `pipe/` in the same commit/PR.
 3. Keep the numeric key id in the Android code in sync with
    `watchface/build/appinfo.json`.
 

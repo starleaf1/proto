@@ -8,13 +8,16 @@ watchface/build/
 watchface/.lock-waf_linux_build
 *.pbw
 
-# --- Android companion (android/) ---
-android/build/
-android/app/build/
-android/.gradle/
-android/local.properties
-android/captures/
-android/.cxx/
+# --- Android companion (pipe/) ---
+# The module also carries its own Android Studio .gitignore; these are the
+# repo-level backstop so artifacts stay out even if that file is regenerated.
+pipe/build/
+pipe/app/build/
+pipe/.gradle/
+pipe/.kotlin/
+pipe/local.properties
+pipe/captures/
+pipe/.cxx/
 *.apk
 *.aab
 *.keystore

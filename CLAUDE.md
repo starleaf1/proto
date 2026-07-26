@@ -9,7 +9,7 @@ an unread-message envelope driven by the companion over Bluetooth.
 ```
 proto/
   watchface/     Pebble watchapp (C, Pebble SDK) — see watchface/CLAUDE.md
-  android/       Android companion app (planned) — sends UnreadCount to the watch
+  pipe/          Android companion app — sends UnreadCount/MissedCount to the watch
   docs/          Architecture and the watch↔phone protocol contract
   README.md      Start here
 ```
@@ -20,15 +20,17 @@ nested file automatically.
 
 - **Pebble watchface:** all `pebble` commands run from `watchface/`. See
   [watchface/CLAUDE.md](watchface/CLAUDE.md).
-- **Android companion:** lives under `android/` (scaffolding may not exist yet).
+- **Android companion:** lives under `pipe/`; all `gradlew` commands run from
+  there. Android Studio scaffolding today — the protocol is not implemented yet.
 
 ## The one contract that ties the components together
 
-The watch and the companion communicate through a single Pebble AppMessage key,
-`UnreadCount` (int32), addressed to app UUID `f2fc68a6-9636-4694-929b-73c11c33f0e4`.
-This is the entire integration surface. Before changing message keys, the UUID,
-or AppMessage buffer sizes on either side, read [docs/protocol.md](docs/protocol.md)
-— both components must move together.
+The watch and the companion communicate through two Pebble AppMessage keys,
+`UnreadCount` (int32, id `10000`) and `MissedCount` (int32, id `10001`), addressed
+to app UUID `f2fc68a6-9636-4694-929b-73c11c33f0e4`. This is the entire integration
+surface. Before changing message keys, the UUID, or AppMessage buffer sizes on
+either side, read [docs/protocol.md](docs/protocol.md) — both components must move
+together.
 
 ## Documentation
 

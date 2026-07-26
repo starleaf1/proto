@@ -15,7 +15,7 @@ houses both sides.
 | Path          | What it is                                                                 |
 | ------------- | -------------------------------------------------------------------------- |
 | `watchface/`  | The Pebble watchapp — C, built with the Pebble SDK.                        |
-| `android/`    | The Android companion app (planned; sends `UnreadCount` and `MissedCount`). |
+| `pipe/`       | The Android companion app (scaffolded; will send `UnreadCount` and `MissedCount`). |
 | `docs/`       | [Architecture](docs/architecture.md) and the [protocol contract](docs/protocol.md). |
 | `CONTRIBUTING.md` | Dev environment setup and conventions.                                 |
 
@@ -53,10 +53,18 @@ See [watchface/CLAUDE.md](watchface/CLAUDE.md) for the full command reference
 
 ### Android companion
 
-Scaffolding lands under `android/`. It will use
+The module lives under `pipe/` (Gradle project `ProtoPipe`, namespace
+`link.dendritik.proto.pipe`):
+
+```sh
+cd pipe
+./gradlew assembleDebug            # requires JDK 21 and the Android SDK
+```
+
+It is currently Android Studio scaffolding — it does not talk to the watch yet.
+The work ahead is a notification listener to source the two counts, plus
 [PebbleKit Android](https://developer.repebble.com/guides/communication/using-pebblekit-android/)
-to send `UnreadCount` and `MissedCount` to the watch. Build steps will be
-documented here and in `android/README.md` once the module exists.
+to send `UnreadCount` and `MissedCount`. See [pipe/README.md](pipe/README.md).
 
 ## Documentation
 

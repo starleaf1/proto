@@ -5,7 +5,7 @@
 ```
 ┌──────────────────────────┐           AppMessage           ┌─────────────────────────┐
 │  Phone companion         │  UnreadCount, MissedCount      │  Pebble watchface       │
-│  (android/ — planned;    │  (int32, phone → watch)        │  (watchface/)           │
+│  (pipe/ — scaffolded;    │  (int32, phone → watch)        │  (watchface/)           │
 │   pkjs stub today)       │  ──────────────────────────►   │  draws the envelope     │
 │                          │         sent on change         │  and missed-call icons  │
 └──────────────────────────┘                                └─────────────────────────┘
@@ -33,7 +33,7 @@ AppMessage arrives carrying `UnreadCount` / `MissedCount`.
 Entry point and lifecycle live in [`watchface/src/c/proto.c`](../watchface/src/c/proto.c);
 the AppMessage inbox handler is `inbox_received()`.
 
-### `android/` — the companion (planned)
+### `pipe/` — the companion (scaffolded)
 
 The companion's job is to compute the unread-message and missed-call counts on
 the phone and push them to the watch as `UnreadCount` and `MissedCount`. Today
@@ -42,8 +42,11 @@ this role is filled by a PebbleKit JS stub
 `ready` and never sends a value — so both icons stay unlit until the Android app
 takes over.
 
-The Android app will use PebbleKit Android to open a channel to the watch UUID
-and send the counts whenever they change.
+`pipe/` is an Android Studio project (Kotlin, Jetpack Compose) that has been
+scaffolded but not yet wired to the watch: it carries no PebbleKit dependency,
+no notification listener, and no key constants. When implemented it will use
+PebbleKit Android to open a channel to the watch UUID and send the counts
+whenever they change.
 
 ## Data flow
 
@@ -58,14 +61,14 @@ and send the counts whenever they change.
 The exact identifiers, buffer sizes, and delivery semantics are specified in
 [protocol.md](protocol.md). Because both sides share that one contract, a change
 to the key, the UUID, or the message shape must land in `watchface/` and
-`android/` together.
+`pipe/` together.
 
 ## Build & tooling boundaries
 
 - `watchface/` builds with the Pebble SDK (`waf` via the `pebble` CLI). Output
   goes to `watchface/build/`, which is generated and gitignored.
-- `android/` will build with Gradle. Its artifacts are gitignored at the repo
-  root.
+- `pipe/` builds with Gradle (`./gradlew assembleDebug`, JDK 21). Its artifacts
+  are gitignored both in-module and at the repo root.
 
 Each component is self-contained; there is no shared build step. The only thing
 they share is the protocol.

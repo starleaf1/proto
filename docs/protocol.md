@@ -1,7 +1,7 @@
 # Watch ↔ phone protocol
 
 This is the complete contract between the Pebble watchface (`watchface/`) and
-the phone companion (`android/`, or the PebbleKit JS stub today). Both sides
+the phone companion (`pipe/`, or the PebbleKit JS stub today). Both sides
 must agree on every value here.
 
 ## Identity

@@ -1,8 +1,8 @@
 # Pebble watchface (`watchface/`)
 
 This directory is the Pebble smartwatch component of the **proto** monorepo — a
-watchface written in C using the Pebble SDK. The sibling `android/` directory
-holds the companion app. See the repo-root `README.md` and `docs/` for the
+watchface written in C using the Pebble SDK. The sibling `pipe/` directory
+holds the Android companion app. See the repo-root `README.md` and `docs/` for the
 system-level picture and the watch↔phone protocol contract.
 
 > **Run every `pebble` command from this directory** (`watchface/`), not the
