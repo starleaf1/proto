@@ -17,13 +17,14 @@ place (`package.json`) and rebuild; the value is embedded into the app binary.
 
 ## Messages
 
-Three keys, all sent **phone → watch**:
+Four keys, all sent **phone → watch**:
 
 | Key           | Numeric ID | Type    | Range        | Meaning                                   |
 | ------------- | ---------- | ------- | ------------ | ----------------------------------------- |
 | `UnreadCount` | `10000`    | `int32` | `>= 0`       | Unread chat-message count. `0` = envelope faded; `> 0` = lit. |
 | `MissedCount` | `10001`    | `int32` | `>= 0`       | Missed-call count. Informational once `PhoneState` is in use — see below. |
 | `PhoneState`  | `10002`    | `int32` | `0`–`3`      | Phone-icon state. `0` idle, `1` call in progress, `2` ringing, `3` missed. Unknown values clamp to idle. |
+| `Heartbeat`   | `10003`    | `int32` | `15`–`3600`  | Seconds until the companion next expects to check in. Sent with **every** message; see [Liveness](#liveness). Out-of-range values clamp. |
 
 `PhoneState` is what colours the phone icon:
 
@@ -48,17 +49,17 @@ outranks a call in progress, which outranks one already missed.
 The names are declared under `messageKeys` in `watchface/package.json`, in the
 order listed there. With `enableMultiJS`, the Pebble build assigns them
 sequential numeric ids starting at **10000** in that array order — `UnreadCount`
-→ **10000**, `MissedCount` → **10001**, `PhoneState` → **10002** (see
-`watchface/build/appinfo.json` → `messageKeys`, and
+→ **10000**, `MissedCount` → **10001**, `PhoneState` → **10002**, `Heartbeat` →
+**10003** (see `watchface/build/appinfo.json` → `messageKeys`, and
 `build/src/message_keys.auto.c`). **Append** any future key to
 the end of the array so existing ids don't shift. Both sides reference a key
 differently:
 
 - **Watch (C):** by symbol — `MESSAGE_KEY_UnreadCount`, `MESSAGE_KEY_MissedCount`,
-  `MESSAGE_KEY_PhoneState`.
+  `MESSAGE_KEY_PhoneState`, `MESSAGE_KEY_Heartbeat`.
 - **PebbleKit JS:** by name — `Pebble.sendAppMessage({ UnreadCount: n })`; the
   JS runtime resolves each name to its id automatically.
-- **PebbleKit Android:** by **numeric id** — `10000` / `10001` / `10002`. Android
+- **PebbleKit Android:** by **numeric id** — `10000` / `10001` / `10002` / `10003`. Android
   does not see the names, so the integers must match. They live in one place,
   [`protocol/Protocol.kt`](../pipe/app/src/main/java/link/dendritik/proto/pipe/protocol/Protocol.kt).
   If keys are ever renumbered (inserting a key out of order can shift ids), update
@@ -103,6 +104,80 @@ Both exist, and the watch resolves the overlap with a one-way latch:
 The latch is per app run and is not persisted, so it re-arms whenever the
 watchface relaunches.
 
+## Liveness
+
+Both status icons are phone-fed, so the watch draws them only while it is sure of
+them. It hides the pair — **not faded, not drawn at all** — the moment it stops
+being sure. Faded is unavailable as a signal here because faded already means
+*idle*, and idle is a positive claim the watch can no longer make. The battery
+gauge is unaffected: it is the one indicator the watch computes itself.
+
+There are two independent ways to lose certainty, and the watch learns them
+differently.
+
+**Bluetooth loss — the watch detects it alone.** `connection_service_subscribe`
+delivers it; no protocol involvement, and nothing for the companion to do. While the
+link is down the companion should not send at all, heartbeats included: there is
+nobody to hear them. `PebbleSender` stands down on `INTENT_PEBBLE_DISCONNECTED` and
+resumes on `INTENT_PEBBLE_CONNECTED`.
+
+**Companion death — only a heartbeat reveals it.** A companion that has crashed, been
+force-stopped, or had its notification access revoked leaves the Bluetooth link
+perfectly healthy. Silence from a dead companion is byte-for-byte identical to
+silence from a companion with no news, so the companion must speak on a schedule
+and the watch treats the absence of that as death.
+
+- **Any inbound message is proof of life.** The explicit `Heartbeat` exists only so a
+  companion with nothing to report can still speak. Ordinary traffic doubles as one.
+- **The companion declares its own cadence.** `Heartbeat` carries *seconds until the
+  next check-in*, not a ping token, so the two sides never have to agree a constant
+  and the companion can change tier without a watchface update.
+- **The watch allows 2.5 periods** before giving up. One missed beat is ordinary on a
+  scheduler Android throttles; two in a row is a dead companion.
+- **Before the first heartbeat, the watch assumes life.** A watchface relaunch raises
+  no event the phone can see, so a watch that started blank would hide the row after
+  every excursion into another app. It starts on the slow cadence's grace
+  (`900 s × 2.5`), during which every count is zero anyway — visually identical to a
+  healthy idle companion.
+- **A verdict does not survive a Bluetooth gap.** On reconnect the watch clears
+  "dead" and resets to the default grace, since the companion was never given a
+  chance to check in while the link was down.
+
+### Cadence
+
+Two tiers, chosen by `PhoneState`, because staleness is not equally harmful in every
+state and Android is not equally willing to wake the companion in every state.
+
+| State | Period | Watch blanks after | Scheduler |
+| ----- | ------ | ------------------ | --------- |
+| `ONGOING` / `RINGING` | **30 s** | 75 s | `Handler.postDelayed` |
+| everything else | **900 s** (15 min) | ~37 min | `AlarmManager.setAndAllowWhileIdle` |
+
+A live call is the only state that lies loudly when it goes stale — a phantom ringing
+handset — and it is also the only state where the device is certainly interactive, so
+the fast tier is both the one that is needed and the one that can actually be
+delivered.
+
+Everything else, **including a lit envelope**, rides the slow tier, and this is the
+part that is easy to get wrong. The tempting rule is "beat faster whenever an icon is
+lit", but a lit envelope on a phone dozing in a pocket is exactly the case that breaks
+it: in Doze the system throttles `setAndAllowWhileIdle` to roughly one alarm per 9–15
+minutes per app, so a nominally faster cadence is simply not delivered, and the watch
+would blank a perfectly correct envelope every night. A stale unread count is a far
+smaller lie than a row that flickers.
+
+Note what this does *not* affect: **notification latency**. Real changes are pushed
+from `onNotificationPosted`, a system callback into a bound
+`NotificationListenerService` that Doze does not defer, and they reach the watch in
+`DEBOUNCE_MS`. The heartbeat is only the "nothing has changed and I am still here"
+signal. Raising its rate would not make a single notification arrive sooner.
+
+15 min is also the practical floor for any companion without a foreground service:
+`setExactAndAllowWhileIdle` needs `SCHEDULE_EXACT_ALARM`, which Android 14 no longer
+grants by default and which Play reserves for genuine alarm-clock apps, and
+`WorkManager`'s periodic minimum is 15 min regardless. Going faster across the board
+means a foreground service and its permanent notification.
+
 ## Watch-side behaviour (already implemented)
 
 In [`watchface/src/c/proto.c`](../watchface/src/c/proto.c):
@@ -123,6 +198,10 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
   } else if (m && !s_phone_seen) {         // pre-PhoneState companion
     s_phone = s_missed > 0 ? PHONE_MISSED : PHONE_IDLE;
   }
+  Tuple *h = dict_find(iter, MESSAGE_KEY_Heartbeat);
+  if (h) s_hb_grace_ms = hb_grace_from(h->value->int32);   // companion declares its cadence
+  if (!s_companion) { s_companion = true; dirty = true; }  // arriving at all is the proof
+  hb_sync();                               // re-arm the watchdog
   if (dirty) {
     flash_sync();                          // one decision point for the timer
     layer_mark_dirty(s_root_layer);
@@ -135,11 +214,12 @@ app_message_open(64, 64);               // inbox / outbox buffers, in bytes
 
 Notes for the sender:
 
-- **Inbox buffer is 64 bytes, and all three keys fit in 34 of them.** A Pebble
+- **Inbox buffer is 64 bytes, and all four keys fit in 45 of them.** A Pebble
   dictionary costs `1 + (n * 7) + payload` bytes — a 1-byte header, then 7 bytes of
-  tuple header (4-byte key, 1-byte type, 2-byte length) per entry. Three `int32`
-  keys are `1 + 3*7 + 3*4 = 34` bytes, leaving 30 bytes of headroom, or two more
-  `int32` keys. `app_message_open` does **not** need raising.
+  tuple header (4-byte key, 1-byte type, 2-byte length) per entry. Four `int32`
+  keys are `1 + 4*7 + 4*4 = 45` bytes, leaving 19 bytes of headroom — room for
+  exactly **one** more `int32` key (56 bytes); a sixth would need
+  `app_message_open` raised. It does **not** need raising today.
 - An oversized message is not truncated — it fails to transmit entirely. Since
   `APP_MESSAGE_INBOX_SIZE_MINIMUM` is 124, the 64-byte request always succeeds.
 - The watch only **reads** these keys; it never replies with app data. The
@@ -172,11 +252,13 @@ val APP_UUID: UUID = UUID.fromString("f2fc68a6-9636-4694-929b-73c11c33f0e4")
 const val KEY_UNREAD_COUNT = 10000
 const val KEY_MISSED_COUNT = 10001
 const val KEY_PHONE_STATE  = 10002
+const val KEY_HEARTBEAT    = 10003
 
 val dict = PebbleDictionary().apply {
     addInt32(KEY_UNREAD_COUNT, unreadCount)
     addInt32(KEY_MISSED_COUNT, missedCount)
     addInt32(KEY_PHONE_STATE, phoneState)   // 0 idle, 1 ongoing, 2 ringing, 3 missed
+    addInt32(KEY_HEARTBEAT, periodSeconds)  // 30 during a call, 900 otherwise
 }
 PebbleKit.sendDataToPebble(applicationContext, APP_UUID, dict)
 ```
@@ -189,8 +271,17 @@ PebbleKit.sendDataToPebble(applicationContext, APP_UUID, dict)
 
 ## Delivery semantics & conventions
 
-- **Send on change, not on a timer.** Push a new value only when it actually
-  changes; redundant sends waste the Bluetooth link and battery.
+- **Send on change, not on a timer** — with the heartbeat as the sole exception.
+  Push a new value only when it actually changes; redundant sends waste the
+  Bluetooth link and battery. When nothing has changed for a whole heartbeat period,
+  re-send the current state anyway (see [Liveness](#liveness)); the watch hides its
+  icons otherwise.
+- **Put `Heartbeat` in every message.** Then ordinary traffic resets the watch's
+  watchdog for free and the explicit heartbeat only fires during real silence. Send
+  the period for the state you are sending, so leaving a call re-declares the slow
+  cadence in the same message that ends it.
+- **Say nothing while Bluetooth is down.** The watch already knows, and hides the
+  row without being told. Stand down on `INTENT_PEBBLE_DISCONNECTED`.
 - **Send absolute values**, not deltas. The watch replaces its stored value outright.
 - **Clamp counts to `>= 0`** and `PhoneState` to `0`–`3`. The watch clamps
   out-of-range `PhoneState` to idle, and lights an icon on `count > 0` — so a
@@ -203,8 +294,10 @@ PebbleKit.sendDataToPebble(applicationContext, APP_UUID, dict)
   `PEBBLE_CONNECTED` broadcast as "whatever I last sent is gone" and re-send even
   if nothing changed.
 - **Send a terminal `PhoneState` when a call ends** (`0`, or `3` if it was missed).
-  The watch has no timeout that would clear a stale ringing state on its own,
-  beyond the 120 s flash watchdog which stops the animation but leaves the icon lit.
+  Nothing on the watch will correct a phantom ring left by a *live* companion: the
+  120 s flash watchdog only stops the animation and leaves the icon lit, and the
+  liveness watchdog does not fire while heartbeats keep arriving. It clears only if
+  the companion goes silent too.
 - **No retry contract is defined yet.** AppMessage may NACK when the watch is
   busy or disconnected; coalesce to the latest value and resend on the next
   opportunity rather than queueing every change.

@@ -56,7 +56,7 @@ notice by hand. See [pipe/README.md](pipe/README.md).
 
 ## The protocol
 
-The watch and phone share three AppMessage keys documented in
+The watch and phone share four AppMessage keys documented in
 [docs/protocol.md](docs/protocol.md). Before changing the UUID, a message key
 or its numeric id, the value type, or the AppMessage buffer sizes:
 

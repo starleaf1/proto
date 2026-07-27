@@ -5,9 +5,10 @@
 ```
 ┌──────────────────────────┐              AppMessage              ┌─────────────────────────┐
 │  Phone companion         │  UnreadCount, MissedCount,           │  Pebble watchface       │
-│  (pipe/ — Android;       │  PhoneState  (int32, phone → watch)  │  (watchface/)           │
-│   reads notifications)   │  ────────────────────────────────►   │  draws the envelope     │
-│                          │           sent on change             │  and phone icons        │
+│  (pipe/ — Android;       │  PhoneState, Heartbeat               │  (watchface/)           │
+│   reads notifications)   │  (int32, phone → watch)              │  draws the envelope     │
+│                          │  ────────────────────────────────►   │  and phone icons        │
+│                          │   on change, plus a liveness beat    │                         │
 └──────────────────────────┘                                      └─────────────────────────┘
 ```
 
@@ -27,9 +28,14 @@ watch state changes:
 - **Time** — hours in Orbitron 54, rendered from a minute tick handler.
 - **Date** — Rajdhani Light 22.
 - **Status icons** — an **unread-message envelope** and a **phone-call handset**,
-  drawn as a centered pair. The connection service gates the pair: while the phone
-  link is down neither icon is drawn, since both are phone-fed and the watch has no
-  current value for either. The handset has four states: faded when idle, green
+  drawn as a centered pair. Two gates gate the pair, and while either is shut neither
+  icon is drawn at all: both are phone-fed, so the watch has no current value for
+  either. The first gate is the connection service — Bluetooth loss, which the watch
+  detects itself. The second is a liveness watchdog fed by the companion's
+  `Heartbeat`, which catches the case Bluetooth cannot: a companion that has crashed
+  or lost notification access while the link stays perfectly healthy. Hidden rather
+  than faded, because faded already means *idle* and idle is a claim the watch can no
+  longer make. The handset has four states: faded when idle, green
   during a call, flashing green/amber while ringing, red for a missed call. On the
   three black-and-white platforms there is no hue to spend, so **rate** carries the
   state instead — static-faded is idle, static-solid is a missed call, and the two
@@ -64,7 +70,7 @@ function and only the edges touch Android:
 | `ProtoNotificationListener` | `notify/ProtoNotificationListener.kt` | The `NotificationListenerService`. Flattens each `StatusBarNotification` into a `NotificationFacts`, and is the only class that touches framework types. |
 | `Classifier` | `notify/Classifier.kt` | Pure. `NotificationFacts` + config → `Verdict`: ignore, chat, or a call in some state. |
 | `ActiveSet` | `notify/ActiveSet.kt` | Holds the live verdict per notification key and folds them into one `IconState`. |
-| `PebbleSender` | `pebble/PebbleSender.kt` | Debounces, drops no-op sends, and re-sends on watch reconnect. |
+| `PebbleSender` | `pebble/PebbleSender.kt` | Debounces, drops no-op sends, re-sends on watch reconnect, and beats a heartbeat through the silence. |
 
 `PipeConfig` (`config/PipeConfig.kt`) holds the routing rules — currently
 hard-coded defaults, shaped so a settings screen could persist them unchanged.
@@ -94,9 +100,19 @@ requires, not a data source.
 4. `PebbleSender` coalesces a burst into one message and sends it only if it
    differs from the last one delivered.
 5. The watchface's `inbox_received()` stores whichever values arrived, calls
-   `flash_sync()`, and marks the root layer dirty.
+   `flash_sync()`, re-arms the liveness watchdog, and marks the root layer dirty.
 6. The next paint lights the envelope when `UnreadCount > 0` and colours the
-   handset from `PhoneState` — and draws neither while the phone link is down.
+   handset from `PhoneState` — and draws neither while the phone link is down or
+   the companion has stopped checking in.
+
+Steps 1–6 are the change path, and it is the only path that carries news. Running
+underneath it is a second, much slower loop whose only job is to prove the companion
+still exists: when nothing has changed for a full period, `PebbleSender` re-sends the
+current state unchanged, and if the watch misses 2.5 periods of that it blanks the
+icon row. The two loops are deliberately independent — the heartbeat rate has no
+bearing on how fast a real notification reaches the watch, which is governed by the
+`onNotificationPosted` callback and a 250 ms debounce. See
+[protocol.md](protocol.md#liveness) for the cadence and why it is what it is.
 
 Notification **content** never leaves the phone. Titles and text are read only to
 spot answer/decline buttons on a call, and are never stored, logged, or transmitted;

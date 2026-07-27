@@ -19,24 +19,29 @@ only indicator left on screen.
 | Path          | What it is                                                                 |
 | ------------- | -------------------------------------------------------------------------- |
 | `watchface/`  | The Pebble watchapp — C, built with the Pebble SDK.                        |
-| `pipe/`       | The Android companion — reads notifications, sends `UnreadCount`, `MissedCount`, `PhoneState`. |
+| `pipe/`       | The Android companion — reads notifications, sends `UnreadCount`, `MissedCount`, `PhoneState`, `Heartbeat`. |
 | `docs/`       | [Architecture](docs/architecture.md) and the [protocol contract](docs/protocol.md). |
 | `CONTRIBUTING.md` | Dev environment setup and conventions.                                 |
 
 ## How the two sides talk
 
-Everything the watch and phone exchange rides on two Pebble AppMessage keys:
+Everything the watch and phone exchange rides on four Pebble AppMessage keys:
 
 | Field        | Value                                    |
 | ------------ | ---------------------------------------- |
 | App UUID     | `f2fc68a6-9636-4694-929b-73c11c33f0e4`   |
-| Message keys | `UnreadCount` (`10000`), `MissedCount` (`10001`), `PhoneState` (`10002`) — `int32` |
+| Message keys | `UnreadCount` (`10000`), `MissedCount` (`10001`), `PhoneState` (`10002`), `Heartbeat` (`10003`) — `int32` |
 | Direction    | phone → watch                            |
-| Behaviour    | `UnreadCount > 0` lights the envelope; `PhoneState` selects the phone icon's colour — `0` idle, `1` in a call, `2` ringing, `3` missed |
+| Behaviour    | `UnreadCount > 0` lights the envelope; `PhoneState` selects the phone icon's colour — `0` idle, `1` in a call, `2` ringing, `3` missed; `Heartbeat` keeps the pair on screen |
 
 The phone sends *meaning*, never colour: three of the seven target platforms are
 black-and-white, and only the watch knows which one it is. Flashing is likewise
 watch-side — the phone says "ringing" once, and the watch runs the animation.
+
+Both icons vanish entirely — not faded — if the watch loses confidence in them,
+whether Bluetooth dropped (the watch notices by itself) or the companion stopped
+checking in (`Heartbeat`). The battery gauge stays, being the one thing the watch
+works out for itself.
 
 That's the whole integration surface. Full details — buffer arithmetic, delivery
 semantics, and the PebbleKit Android call — are in

@@ -25,7 +25,8 @@
     "messageKeys": [
       "UnreadCount",
       "MissedCount",
-      "PhoneState"
+      "PhoneState",
+      "Heartbeat"
     ],
     "resources": {
       "media": [

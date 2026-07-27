@@ -37,6 +37,10 @@ pebble screenshot --no-open screenshot.png
 
 # Drive the companion-fed icons by numeric key id (see ../docs/protocol.md)
 pebble send-app-message --emulator basalt --vnc --int 10000=3 10002=2
+
+# Same, but declare a 15s heartbeat (the minimum) so the liveness watchdog gives up
+# after ~38s instead of ~38min — the only practical way to watch the row blank.
+pebble send-app-message --emulator basalt --vnc --int 10000=3 10002=2 10003=15
 ```
 
 If you need more information on the `pebble` command or a sub-command, append `--help`.
@@ -61,7 +65,9 @@ The `--vnc` flag enables a VNC-based display backend that doesn't require X11.
 
 - **One emulator per platform at a time.** A wedged `qemu-pebble` keeps VNC display
   `:1` bound, and the next command fails with `Failed to find an available port`.
-  `pkill -f qemu-pebble` before retrying.
+  Kill it before retrying — but bracket the pattern: `pkill -f 'qemu[-]pebble'`.
+  Written plainly, `pkill -f qemu-pebble` matches the shell running it and kills
+  itself (exit 144) before reaching the rest of the command line.
 - `pebble screenshot` has **no `--scale` flag** in pebble-tool 5.0.39.
 - **Colour correction is on by default** — the screenshot is remapped through a
   display-emulation LUT, so `GColorYellow` comes out near-white. Pass
@@ -98,13 +104,14 @@ The application follows the standard Pebble app architecture:
 
 ## Phone ↔ watch contract
 
-The watchface renders two companion-driven icons from three AppMessage keys:
+The watchface renders two companion-driven icons from four AppMessage keys:
 
 | Key | Id | Drives |
 | --- | -- | ------ |
 | `UnreadCount` | `10000` | Envelope: `> 0` lit, `0` faded |
 | `MissedCount` | `10001` | A count. Informational once `PhoneState` has been sent |
 | `PhoneState`  | `10002` | Phone icon — see the table below |
+| `Heartbeat`   | `10003` | Seconds until the companion next checks in — see *Liveness* |
 
 The companion decides state; this watchface decides how each state *looks* on the
 current display. **No colour or blink timing crosses the wire.**
@@ -126,6 +133,36 @@ Two things here are deliberate and easy to "fix" wrongly:
   ink colour there is no hue to spend, so the flash rate carries the meaning. An
   earlier attempt used a steady half-tone for ongoing, but then a single glance
   could not distinguish it from a dithered idle.
+
+### Liveness
+
+Both icons are phone-fed, so the row is hidden outright — not faded — whenever the
+watch cannot vouch for them. Faded is unavailable as a signal because faded already
+means *idle*. The battery gauge is never gated; it is the one value the watch owns.
+
+Two independent gates, learned two different ways:
+
+- `s_connected` — Bluetooth, from `connection_service_subscribe`. The watch detects
+  this alone, and the companion is expected to send nothing at all while it holds.
+- `s_companion` — the liveness watchdog. A companion that has crashed or lost
+  notification access leaves Bluetooth perfectly healthy, and its silence is
+  indistinguishable from having no news, so it must check in on a schedule instead.
+
+`hb_sync()` owns the watchdog's `AppTimer` in exactly the single-owner shape
+`flash_sync()` uses. **Any** inbound message re-arms it; `Heartbeat` exists only so a
+companion with nothing to report can still speak, which is also why a pre-`Heartbeat`
+companion keeps working on the default cadence. The timeout is 2.5× the period the
+*companion* declares, so the cadence lives on one side only — do not hardcode a
+matching constant here. Two behaviours look like bugs and are not:
+
+- **It starts assuming the companion is alive.** A watchface relaunch raises no event
+  the phone can see, so starting blank would hide the row after every excursion into
+  another app. Zeros render as plain idle, which is what a healthy idle companion
+  looks like anyway.
+- **A Bluetooth drop clears the verdict and resets the grace.** The companion never
+  had a chance to check in while the link was down, so holding "dead" against it
+  would blank the row after reconnect; and a 30 s in-call cadence must not be
+  inherited into a reconnect where the companion is back on its 900 s tier.
 
 ### Animation
 

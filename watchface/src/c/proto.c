@@ -13,7 +13,10 @@
 //
 // The battery gauge is the only always-on indicator. Both status icons come from
 // the phone, so when the companion link is down the whole row is hidden rather
-// than showing counts the watch can no longer trust.
+// than showing counts the watch can no longer trust. "Down" has two independent
+// causes and the watch learns them differently: Bluetooth loss it detects itself
+// through the connection service, while a companion that has died with the link
+// still up is invisible until it fails to check in — see the Heartbeat section.
 //
 // The phone icon is the only thing here that moves faster than a minute: a live
 // call flashes, faster while ringing than once answered. The companion decides the
@@ -31,6 +34,17 @@
 #define FLASH_RING_MS 250    // ringing — 2 Hz
 #define FLASH_CALL_MS 500    // call in progress — 1 Hz (B&W only; color shows steady green)
 #define FLASH_MAX_MS  120000 // give up flashing after this; a dead companion must not drain us
+
+// Companion liveness watchdog. The phone declares its own cadence in the Heartbeat
+// key (seconds until it next expects to check in) rather than the two sides agreeing
+// a constant, so the companion can run fast during a call and slow the rest of the
+// time without a watchface update. We allow 2.5 periods before giving up: one miss is
+// ordinary on a scheduler Android throttles, two in a row is a dead companion.
+#define HB_GRACE_NUM 5       // timeout = declared period * HB_GRACE_NUM / HB_GRACE_DEN
+#define HB_GRACE_DEN 2
+#define HB_MIN_S     15      // clamp a garbled period into something survivable
+#define HB_MAX_S     3600
+#define HB_DEFAULT_S 900     // assumed cadence before the companion has declared one
 
 // Phone-call state, decided by the companion (see docs/protocol.md). The watch
 // maps the enum to a look; it never receives a color.
@@ -50,6 +64,9 @@ static int                s_missed = 0;   // fed by companion; a count, not the 
 static int                s_phone = PHONE_IDLE;  // fed by companion; drives the phone icon
 static bool               s_phone_seen = false;  // companion has spoken PhoneState at least once
 static bool               s_focused = true;      // false while a modal covers the face
+static bool               s_companion = true;    // companion has checked in recently (see hb_*)
+static AppTimer          *s_hb_timer = NULL;     // liveness watchdog; non-NULL only while armed
+static uint32_t           s_hb_grace_ms = 0;     // how long silence may last; set by hb_grace_from
 static AppTimer          *s_flash_timer = NULL;  // non-NULL only while flashing
 static bool               s_flash_on = false;    // which half of the flash we're in
 static uint16_t           s_flash_period = 0;    // current half-period in ms; 0 = not flashing
@@ -146,7 +163,7 @@ static void flash_tick(void *data);
 // only ringing animates — a call in progress is steady green there, and it is the
 // B&W platforms, with no color to spend, that use rate to tell the two apart.
 static uint16_t flash_period(void) {
-  if (!s_connected || !s_focused) return 0;
+  if (!s_connected || !s_companion || !s_focused) return 0;
   if (s_phone == PHONE_RINGING) return FLASH_RING_MS;
 #ifndef PBL_COLOR
   if (s_phone == PHONE_ONGOING) return FLASH_CALL_MS;
@@ -192,6 +209,55 @@ static void flash_sync(void) {
     s_flash_timer = app_timer_register(want, flash_tick, NULL);
   }
   layer_mark_dirty(s_root_layer);
+}
+
+// ---------------------------------------------------------------------------
+// Companion liveness
+// ---------------------------------------------------------------------------
+
+// Two different failures blank the icon row, and the watch cannot detect them the
+// same way. Bluetooth loss it is told about, by the connection service. A companion
+// that has crashed, been force-stopped, or had its notification access revoked is
+// silent in a way that looks exactly like "nothing has changed" — so the companion
+// proves it is alive on a schedule instead, and this watchdog is the absence of that
+// proof. Any inbound message counts as proof; the explicit Heartbeat key exists only
+// so a companion with no news to report can still speak.
+//
+// While Bluetooth is down the watchdog is off entirely: the row is already hidden by
+// s_connected, the phone has been told not to bother sending, and an armed timer
+// would only fire to conclude something we already know.
+
+static uint32_t hb_grace_from(int32_t period_s) {
+  if (period_s < HB_MIN_S) period_s = HB_MIN_S;
+  if (period_s > HB_MAX_S) period_s = HB_MAX_S;
+  return (uint32_t)period_s * 1000u * HB_GRACE_NUM / HB_GRACE_DEN;
+}
+
+static void hb_stop(void) {
+  if (s_hb_timer) {
+    app_timer_cancel(s_hb_timer);
+    s_hb_timer = NULL;
+  }
+}
+
+static void hb_expired(void *data) {
+  s_hb_timer = NULL;                 // an elapsed handle must never be cancelled
+  s_companion = false;
+  // Drop the call state with the companion, for the same reason conn_handler does:
+  // a phantom ring must not spring back to life the moment it checks in again. The
+  // counts survive — the companion re-sends them, and the row is hidden regardless.
+  s_phone = PHONE_IDLE;
+  flash_sync();
+  layer_mark_dirty(s_root_layer);
+}
+
+// Sole owner of the watchdog's lifetime, in the same shape as flash_sync(): every
+// path that hears from the companion or changes s_connected calls it, nothing else
+// touches the handle.
+static void hb_sync(void) {
+  hb_stop();
+  if (!s_connected) return;          // no link, no heartbeat expected
+  s_hb_timer = app_timer_register(s_hb_grace_ms, hb_expired, NULL);
 }
 
 // ---------------------------------------------------------------------------
@@ -401,10 +467,12 @@ static void root_update_proc(Layer *layer, GContext *ctx) {
 
   // 5. Icon row — phone call + envelope, laid out by their visual extents with
   // a uniform gap and centered as a pair on c.x. Both states come from the
-  // companion over AppMessage, so a dropped link means the watch has no current
-  // value for either: hide the row entirely rather than show a stale count. The
+  // companion over AppMessage, so either a dropped Bluetooth link or a companion
+  // that has stopped checking in means the watch has no current value for either:
+  // hide the row entirely rather than show a stale count. Not faded — faded is
+  // already the idle look, and "idle" is a claim the watch can no longer make. The
   // battery gauge above stays put — it is the one indicator the watch owns.
-  if (s_connected) {
+  if (s_connected && s_companion) {
     int16_t icon_cy = c.y + (R * 3) / 5;
     int16_t mc_hw = R / 8, env_hw = R / 8;
     int16_t gap = R / 6;
@@ -437,7 +505,17 @@ static void conn_handler(bool connected) {
   // Drop the call state with the link: otherwise a blip during a ring leaves us
   // flashing a phantom the moment it returns. The counts survive — clearing them
   // would blank the envelope on every blip, which the row's own gate handles.
-  if (!connected) s_phone = PHONE_IDLE;
+  if (!connected) {
+    s_phone = PHONE_IDLE;
+    // Clear the liveness verdict too, rather than carry it across the gap. The
+    // companion was never given a chance to check in while the link was down, so
+    // holding "dead" against it would blank the row after a reconnect until the
+    // next heartbeat. Reset the grace as well: a 30 s in-call cadence must not be
+    // inherited into a reconnect, where the companion is back on its slow tier.
+    s_companion = true;
+    s_hb_grace_ms = hb_grace_from(HB_DEFAULT_S);
+  }
+  hb_sync();                               // stops the watchdog while down, re-arms on return
   flash_sync();                            // no link, no flash
   layer_mark_dirty(s_root_layer);
 }
@@ -464,6 +542,16 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
   } else if (m && !s_phone_seen) {         // pre-PhoneState companion: count drives the icon
     s_phone = s_missed > 0 ? PHONE_MISSED : PHONE_IDLE;
   }
+  Tuple *h = dict_find(iter, MESSAGE_KEY_Heartbeat);
+  if (h) s_hb_grace_ms = hb_grace_from(h->value->int32);   // companion declares its own cadence
+
+  // Arriving at all is the proof, whatever the message carried — a companion sending
+  // data is a companion that is alive, so the explicit key is only needed when it has
+  // nothing else to say. A pre-Heartbeat companion therefore still keeps the row
+  // visible, on the default cadence, purely by sending counts.
+  if (!s_companion) { s_companion = true; dirty = true; }
+  hb_sync();
+
   if (dirty) {
     flash_sync();                          // one decision point for the timer
     layer_mark_dirty(s_root_layer);
@@ -502,6 +590,13 @@ static void init(void) {
   update_buffers();
   s_batt = battery_state_service_peek();
   s_connected = connection_service_peek_pebble_app_connection();
+  // Assume the companion is alive until the watchdog says otherwise. Nothing has
+  // been received yet, so every count is zero and the row renders as plain idle —
+  // which is what a healthy idle companion looks like anyway. The alternative,
+  // starting blank, would hide the row after every excursion into another app,
+  // because a watchface relaunch raises no event the phone can see.
+  s_companion = true;
+  s_hb_grace_ms = hb_grace_from(HB_DEFAULT_S);
 
   s_window = window_create();
   window_set_background_color(s_window, GColorWhite);
@@ -521,10 +616,12 @@ static void init(void) {
 
   app_message_register_inbox_received(inbox_received);
   app_message_open(64, 64);
+  hb_sync();                                    // start the clock on the companion
 }
 
 static void deinit(void) {
   flash_stop();                  // before window_destroy — the callback holds s_root_layer
+  hb_stop();                     // likewise: hb_expired marks the root layer dirty
   tick_timer_service_unsubscribe();
   battery_state_service_unsubscribe();
   connection_service_unsubscribe();

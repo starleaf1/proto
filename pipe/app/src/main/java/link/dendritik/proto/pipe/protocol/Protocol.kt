@@ -17,6 +17,26 @@ object Protocol {
     const val KEY_UNREAD_COUNT = 10000
     const val KEY_MISSED_COUNT = 10001
     const val KEY_PHONE_STATE = 10002
+    const val KEY_HEARTBEAT = 10003
+
+    /**
+     * Seconds until we next expect to check in, sent with every message so the watch
+     * can size its own liveness watchdog (it allows 2.5 of these before blanking the
+     * icon row). Two tiers, because staleness is not equally harmful in every state
+     * and Android is not equally willing to wake us in every state.
+     *
+     * A live call is the only state that lies loudly when it goes stale — a phantom
+     * ringing handset — and it is also the one state where the device is definitely
+     * interactive, so a plain [android.os.Handler] fires on time and costs nothing.
+     *
+     * Everything else, including a lit envelope, rides the slow tier. It has to: in
+     * Doze the system throttles `setAndAllowWhileIdle` to roughly one alarm per 9-15
+     * minutes per app, so a nominally faster cadence would not be delivered and the
+     * watch would blank a perfectly correct icon every night. A stale unread count is
+     * a much smaller lie than a row that flickers.
+     */
+    const val HEARTBEAT_LIVE_S = 30
+    const val HEARTBEAT_IDLE_S = 900
 }
 
 /**
