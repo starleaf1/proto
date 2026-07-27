@@ -1,14 +1,18 @@
 // PebbleKit JS companion.
 //
-// The watchface renders two phone-driven status icons: an "unread message"
-// envelope (`UnreadCount`) and a "missed call" handset (`MissedCount`). Pebble
-// exposes no on-watch API for either count, so this companion is the only place
-// those values can come from. There is no public way to read them from
-// PebbleKit JS either, so for now this is a stub: both icons stay unlit
-// (count 0) until a real data source is wired up here.
+// Not the data source. The watchface's three phone-driven values — an "unread
+// message" envelope (`UnreadCount`), a missed-call count (`MissedCount`) and the
+// phone-call state (`PhoneState`) — are supplied by the Android companion in
+// `pipe/`, which reads the notification shade and talks to the watch over
+// PebbleKit Android. There is no public way to read any of it from PebbleKit JS.
 //
-// To light an icon, send an integer under its key, e.g.:
-//   Pebble.sendAppMessage({ UnreadCount: 3, MissedCount: 1 });
+// This file stays a stub deliberately: it exists because the build wants a JS
+// entry point, and if it sent anything it would race the companion for the same
+// keys.
+//
+// For manual testing prefer the CLI, which addresses keys by numeric id
+// (see ../../../docs/protocol.md):
+//   pebble send-app-message --emulator basalt --vnc --int 10000=3 10002=2
 
 Pebble.addEventListener('ready', function () {
   console.log('proto watchface companion ready');

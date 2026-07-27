@@ -8,18 +8,33 @@
 // hand sweeps like an analog clock's — at 4:30 it points midway between the 4
 // and 5 marks. A battery gauge rides just above the numeral. Day/date/month on a
 // lighter line below, and a bottom row of two companion-driven status icons
-// (missed call / unread message). Sporty 2000s-futurism vibe: electric-blue
+// (phone-call state / unread message). Sporty 2000s-futurism vibe: electric-blue
 // highlight, techno-geometric Orbitron numeral, tach-style dial.
 //
 // The battery gauge is the only always-on indicator. Both status icons come from
 // the phone, so when the companion link is down the whole row is hidden rather
 // than showing counts the watch can no longer trust.
 //
+// The phone icon is the only thing here that moves faster than a minute: a live
+// call flashes, faster while ringing than once answered. The companion decides the
+// call state; the watch decides what each state looks like on this particular
+// display, which is why no color ever crosses the wire.
+//
 // All geometry derives from the root layer's bounds so it adapts to every
 // target platform (rectangular + round, B&W + color) with no hardcoded sizes.
 // ---------------------------------------------------------------------------
 
-#define EDGE_MARGIN 3   // dial inset from the physical screen edge (px)
+#define EDGE_MARGIN 3      // dial inset from the physical screen edge (px)
+// Flash half-periods in ms, i.e. how long one phase lasts. 125 ms per phase is a
+// 250 ms cycle = 4 Hz; 250 ms per phase is 2 Hz. Ringing is the faster, more
+// urgent of the two.
+#define FLASH_RING_MS 250    // ringing — 2 Hz
+#define FLASH_CALL_MS 500    // call in progress — 1 Hz (B&W only; color shows steady green)
+#define FLASH_MAX_MS  120000 // give up flashing after this; a dead companion must not drain us
+
+// Phone-call state, decided by the companion (see docs/protocol.md). The watch
+// maps the enum to a look; it never receives a color.
+enum { PHONE_IDLE = 0, PHONE_ONGOING, PHONE_RINGING, PHONE_MISSED };
 
 static Window *s_window;
 static Layer  *s_root_layer;
@@ -31,7 +46,14 @@ static struct tm         s_now;
 static BatteryChargeState s_batt;
 static bool               s_connected = true;
 static int                s_unread = 0;   // fed by companion via AppMessage; 0 = unlit
-static int                s_missed = 0;   // fed by companion via AppMessage; 0 = unlit
+static int                s_missed = 0;   // fed by companion; a count, not the icon's look
+static int                s_phone = PHONE_IDLE;  // fed by companion; drives the phone icon
+static bool               s_phone_seen = false;  // companion has spoken PhoneState at least once
+static bool               s_focused = true;      // false while a modal covers the face
+static AppTimer          *s_flash_timer = NULL;  // non-NULL only while flashing
+static bool               s_flash_on = false;    // which half of the flash we're in
+static uint16_t           s_flash_period = 0;    // current half-period in ms; 0 = not flashing
+static uint32_t           s_flash_ms = 0;        // elapsed flash time, see FLASH_MAX_MS
 
 static char s_min_buf[4];    // "05" / "30"
 static char s_date_buf[24];  // "MON 22 JUL"
@@ -105,6 +127,74 @@ static void update_buffers(void) {
 }
 
 // ---------------------------------------------------------------------------
+// Call flash
+// ---------------------------------------------------------------------------
+
+// The phone icon is the only thing on this face that animates; nothing else moves
+// faster than a minute. One self-re-arming one-shot timer drives it, at a rate that
+// depends on the state — so the rate itself carries meaning. It runs only during a
+// call, a bounded window, so the extra repaints never become an always-on cost.
+//
+// flash_sync() is the sole owner of the timer's lifetime: every handler that can
+// change s_phone, s_connected or s_focused calls it, and nothing else touches the
+// handle. It is also what re-arms at a new rate when the state changes mid-call
+// (ringing -> answered), which a plain "already running, leave it" guard would miss.
+
+static void flash_tick(void *data);
+
+// Half-period for the current state, or 0 when the icon should be static. On color
+// only ringing animates — a call in progress is steady green there, and it is the
+// B&W platforms, with no color to spend, that use rate to tell the two apart.
+static uint16_t flash_period(void) {
+  if (!s_connected || !s_focused) return 0;
+  if (s_phone == PHONE_RINGING) return FLASH_RING_MS;
+#ifndef PBL_COLOR
+  if (s_phone == PHONE_ONGOING) return FLASH_CALL_MS;
+#endif
+  return 0;
+}
+
+static void flash_stop(void) {
+  if (s_flash_timer) {
+    app_timer_cancel(s_flash_timer);   // handle is dead the moment this returns
+    s_flash_timer = NULL;
+  }
+  s_flash_period = 0;
+  s_flash_on = false;
+}
+
+static void flash_tick(void *data) {
+  s_flash_timer = NULL;                // an elapsed handle must never be cancelled
+  if (s_flash_period) {
+    s_flash_on = !s_flash_on;
+    s_flash_ms += s_flash_period;
+    // Self-terminating: give up after FLASH_MAX_MS so a companion that dies
+    // mid-call can't drain the watch. Giving up leaves the icon on its lit phase —
+    // visible, just no longer moving.
+    if (s_flash_ms < FLASH_MAX_MS) {
+      s_flash_timer = app_timer_register(s_flash_period, flash_tick, NULL);
+    } else {
+      s_flash_period = 0;
+      s_flash_on = true;
+    }
+  }
+  layer_mark_dirty(s_root_layer);
+}
+
+static void flash_sync(void) {
+  uint16_t want = flash_period();
+  if (want == s_flash_period) return;  // already at the right rate (or already off)
+  flash_stop();
+  if (want) {
+    s_flash_period = want;
+    s_flash_on = true;                 // enter lit so the change is seen immediately
+    s_flash_ms = 0;
+    s_flash_timer = app_timer_register(want, flash_tick, NULL);
+  }
+  layer_mark_dirty(s_root_layer);
+}
+
+// ---------------------------------------------------------------------------
 // Icons
 // ---------------------------------------------------------------------------
 
@@ -149,17 +239,37 @@ static void draw_battery(GContext *ctx, GPoint cp, int16_t hw, int16_t hh) {
   }
 }
 
-// Missed-call indicator — the Material Design "call" handset, traced as a
+// Phone-call indicator — the Material Design "call" handset, traced as a
 // filled polygon: earpiece top-left, mouthpiece bottom-right, joined by a
-// diagonal grip with a concave inner edge. Lit (a call was missed) fills bold
-// red on color / black on B&W; unlit fades to a ghost like the other icons.
-static void draw_missed_call(GContext *ctx, GPoint cp, int16_t hw, int16_t hh) {
-  bool lit = s_missed > 0;
+// diagonal grip with a concave inner edge. The companion owns the state, the
+// watch owns the look. Color: green in a call, green/amber flash while ringing,
+// red for a missed call, ghost when idle. B&W has no color to spend, so **rate**
+// carries the state there instead: ghost = idle, solid and steady = missed call,
+// flashing at 2 Hz = call in progress, flashing at 4 Hz = ringing. Both flashes
+// swing all the way to the ghost, because with rate doing the discriminating the
+// only thing the swing has to do is be unmistakably visible.
+static void draw_phone(GContext *ctx, GPoint cp, int16_t hw, int16_t hh) {
   GColor col;
+  bool   ghost = false;                    // fade the icon back after drawing it
 #ifdef PBL_COLOR
-  col = lit ? GColorRed : GColorLightGray;   // red = missed-call alert
+  switch (s_phone) {
+    // GColorGreen/GColorYellow are near-invisible on white (1.4:1 and 1.1:1) —
+    // fine for the battery gauge, which sits inside a black outline, but this
+    // gpath has no outline to give it edges. Use the darker pair.
+    case PHONE_ONGOING: col = GColorIslamicGreen; break;                // call in progress
+    case PHONE_RINGING: col = s_flash_on ? GColorIslamicGreen
+                                         : GColorChromeYellow; break;   // alternates
+    case PHONE_MISSED:  col = GColorRed; break;                         // missed-call alert
+    default:            col = GColorLightGray; ghost = true; break;     // idle
+  }
 #else
-  col = GColorBlack;
+  col = GColorBlack;                       // no color: rate carries the state
+  switch (s_phone) {
+    case PHONE_ONGOING:                                      // 2 Hz, see flash_period
+    case PHONE_RINGING: ghost = !s_flash_on; break;          // 4 Hz
+    case PHONE_MISSED:  break;                               // solid and steady
+    default:            ghost = true; break;                 // idle
+  }
 #endif
   // Outline of Material's `call` glyph in a grid centred on the icon and spanning
   // ~±36; scaled to the box at runtime (denominator < 48 makes it fill more).
@@ -180,7 +290,7 @@ static void draw_missed_call(GContext *ctx, GPoint cp, int16_t hw, int16_t hh) {
   gpath_draw_filled(ctx, path);
   gpath_destroy(path);
 
-  if (!lit) {                                // barely-visible when nothing missed
+  if (ghost) {
     fade_icon(ctx, GRect(cp.x - hw - 2, cp.y - hh - 2, 2 * (hw + 2), 2 * (hh + 2)));
   }
 }
@@ -289,8 +399,8 @@ static void root_update_proc(Layer *layer, GContext *ctx) {
   graphics_draw_text(ctx, s_date_buf, s_date_font, date_box,
                      GTextOverflowModeFill, GTextAlignmentCenter, NULL);
 
-  // 5. Icon row — missed call + envelope, laid out by their visual extents with
-  // a uniform gap and centered as a pair on c.x. Both counts come from the
+  // 5. Icon row — phone call + envelope, laid out by their visual extents with
+  // a uniform gap and centered as a pair on c.x. Both states come from the
   // companion over AppMessage, so a dropped link means the watch has no current
   // value for either: hide the row entirely rather than show a stale count. The
   // battery gauge above stays put — it is the one indicator the watch owns.
@@ -302,7 +412,7 @@ static void root_update_proc(Layer *layer, GContext *ctx) {
     int16_t x = c.x - total / 2;                     // left edge of the centered row
     int16_t mc_cx  = x + mc_hw;   x += 2 * mc_hw + gap;
     int16_t env_cx = x + env_hw;
-    draw_missed_call(ctx, GPoint(mc_cx,  icon_cy), mc_hw,  R / 8);
+    draw_phone(ctx, GPoint(mc_cx,  icon_cy), mc_hw,  R / 8);
     draw_envelope(ctx,    GPoint(env_cx, icon_cy), env_hw, R / 12);
   }
 }
@@ -324,7 +434,19 @@ static void battery_handler(BatteryChargeState state) {
 
 static void conn_handler(bool connected) {
   s_connected = connected;
+  // Drop the call state with the link: otherwise a blip during a ring leaves us
+  // flashing a phantom the moment it returns. The counts survive — clearing them
+  // would blank the envelope on every blip, which the row's own gate handles.
+  if (!connected) s_phone = PHONE_IDLE;
+  flash_sync();                            // no link, no flash
   layer_mark_dirty(s_root_layer);
+}
+
+// A modal (notification, quick view) covering the face makes the icon row
+// invisible; there is no point repainting it twice a second underneath.
+static void focus_handler(bool in_focus) {
+  s_focused = in_focus;
+  flash_sync();
 }
 
 static void inbox_received(DictionaryIterator *iter, void *ctx) {
@@ -332,8 +454,20 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
   Tuple *u = dict_find(iter, MESSAGE_KEY_UnreadCount);
   if (u) { s_unread = u->value->int32; dirty = true; }   // drives the envelope
   Tuple *m = dict_find(iter, MESSAGE_KEY_MissedCount);
-  if (m) { s_missed = m->value->int32; dirty = true; }   // drives the missed-call icon
-  if (dirty) layer_mark_dirty(s_root_layer);
+  if (m) { s_missed = m->value->int32; dirty = true; }   // a count; see PhoneState
+  Tuple *p = dict_find(iter, MESSAGE_KEY_PhoneState);
+  if (p) {                                 // authoritative once ever sent
+    int32_t v = p->value->int32;
+    s_phone = (v >= PHONE_IDLE && v <= PHONE_MISSED) ? (int)v : PHONE_IDLE;   // clamp
+    s_phone_seen = true;
+    dirty = true;
+  } else if (m && !s_phone_seen) {         // pre-PhoneState companion: count drives the icon
+    s_phone = s_missed > 0 ? PHONE_MISSED : PHONE_IDLE;
+  }
+  if (dirty) {
+    flash_sync();                          // one decision point for the timer
+    layer_mark_dirty(s_root_layer);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -383,15 +517,18 @@ static void init(void) {
     .pebble_app_connection_handler = conn_handler,
     .pebblekit_connection_handler = NULL,
   });
+  app_focus_service_subscribe(focus_handler);   // pause the flash under a modal
 
   app_message_register_inbox_received(inbox_received);
   app_message_open(64, 64);
 }
 
 static void deinit(void) {
+  flash_stop();                  // before window_destroy — the callback holds s_root_layer
   tick_timer_service_unsubscribe();
   battery_state_service_unsubscribe();
   connection_service_unsubscribe();
+  app_focus_service_unsubscribe();
   if (s_custom_fonts) {
     fonts_unload_custom_font(s_num_font);
     fonts_unload_custom_font(s_date_font);

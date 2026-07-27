@@ -2,6 +2,18 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Reading the notification shade needs no <uses-permission>: it is a
+         user-granted special access (Settings > Notification access), claimed by
+         binding ProtoNotificationListener below. MainActivity drives the grant. -->
+
+    <!-- Package visibility (Android 11+). PebbleKit talks to the Pebble app by
+         broadcast and reads its content provider to answer isWatchConnected();
+         both are invisible without an explicit <queries> declaration. -->
+    <queries>
+        <package android:name="com.getpebble.android.basalt" />
+        <package android:name="com.getpebble.android" />
+    </queries>
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -23,6 +35,20 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- The only data source in the app. The system binds this once the user
+             grants notification access; it is not started by us. exported must be
+             true so the system can bind it, and the permission gate ensures only
+             the system can. -->
+        <service
+            android:name=".notify.ProtoNotificationListener"
+            android:exported="true"
+            android:label="@string/listener_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>

@@ -33,10 +33,17 @@ pebble clean
 pebble install --emulator basalt
 
 # Screenshot the running emulator
-pebble screenshot --scale 6 --no-open screenshot.png
+pebble screenshot --no-open screenshot.png
+
+# Drive the companion-fed icons by numeric key id (see ../docs/protocol.md)
+pebble send-app-message --emulator basalt --vnc --int 10000=3 10002=2
 ```
 
 If you need more information on the `pebble` command or a sub-command, append `--help`.
+
+> **After adding a message key**, run `pebble clean` before `pebble build`.
+> `message_keys.auto.h` is not regenerated incrementally, so the new
+> `MESSAGE_KEY_*` symbol comes back undeclared.
 
 ### Headless Environments
 
@@ -44,11 +51,25 @@ If you're running in an environment without a window server (e.g., headless Linu
 
 ```bash
 pebble install --emulator basalt --vnc
-pebble screenshot --vnc --scale 6 --no-open screenshot.png
+pebble screenshot --vnc --no-open screenshot.png
 pebble emu-button --emulator basalt --vnc click select
 ```
 
 The `--vnc` flag enables a VNC-based display backend that doesn't require X11.
+
+### Emulator gotchas in this environment
+
+- **One emulator per platform at a time.** A wedged `qemu-pebble` keeps VNC display
+  `:1` bound, and the next command fails with `Failed to find an available port`.
+  `pkill -f qemu-pebble` before retrying.
+- `pebble screenshot` has **no `--scale` flag** in pebble-tool 5.0.39.
+- **Colour correction is on by default** — the screenshot is remapped through a
+  display-emulation LUT, so `GColorYellow` comes out near-white. Pass
+  `--no-correction` when asserting on exact palette RGB.
+- `pebble emu-set-time` does not move an already-running watchface.
+- `pebble send-app-message` requires **numeric** key ids, not names.
+- `pebble emu-bt-connection --connected no` tends to wedge the control channel; do
+  it last, in a throwaway emulator.
 
 ## Project Structure
 
@@ -73,14 +94,52 @@ The application follows the standard Pebble app architecture:
 
 1. **Main Entry Point**: `src/c/proto.c` - The `main()` function initializes the app and starts the event loop
 2. **Window Management**: Single window app with a root layer whose update proc draws the time, date, and status icons
-3. **Event Handling**: Tick, battery, and connection service handlers; `UnreadCount` arrives via AppMessage inbox from the companion
+3. **Event Handling**: Tick, battery, connection, and app-focus service handlers; `UnreadCount`, `MissedCount` and `PhoneState` arrive via AppMessage inbox from the companion
 
 ## Phone ↔ watch contract
 
-The watchface renders an unread-message envelope icon driven by a single
-AppMessage key, `UnreadCount` (int32). It is the integration point for the
-companion app. See `../docs/protocol.md` for the full contract (UUID, key,
-buffer sizes) that the Android companion must implement.
+The watchface renders two companion-driven icons from three AppMessage keys:
+
+| Key | Id | Drives |
+| --- | -- | ------ |
+| `UnreadCount` | `10000` | Envelope: `> 0` lit, `0` faded |
+| `MissedCount` | `10001` | A count. Informational once `PhoneState` has been sent |
+| `PhoneState`  | `10002` | Phone icon — see the table below |
+
+The companion decides state; this watchface decides how each state *looks* on the
+current display. **No colour or blink timing crosses the wire.**
+
+| `PhoneState` | Colour (basalt, chalk, emery, gabbro) | B&W (aplite, diorite, flint) |
+| ------------ | ------------------------------------- | ---------------------------- |
+| `0` idle     | `GColorLightGray`, faded via `fade_icon` | faded, static             |
+| `1` ongoing  | `GColorIslamicGreen`, **steady**      | flashing **2 Hz**            |
+| `2` ringing  | flashing `GColorIslamicGreen` ↔ `GColorChromeYellow`, 4 Hz | flashing **4 Hz** |
+| `3` missed   | `GColorRed`, steady                   | solid black, static          |
+
+Two things here are deliberate and easy to "fix" wrongly:
+
+- **`GColorGreen` and `GColorYellow` are not used.** On the white background they
+  measure 1.4:1 and 1.1:1 contrast — a flash whose dim phase is invisible. The
+  battery gauge can use them because it sits inside a black outline; this free-
+  floating gpath cannot.
+- **B&W uses rate, not density, to separate ongoing from ringing.** With only one
+  ink colour there is no hue to spend, so the flash rate carries the meaning. An
+  earlier attempt used a steady half-tone for ongoing, but then a single glance
+  could not distinguish it from a dithered idle.
+
+### Animation
+
+The phone icon's flash is the app's only sub-minute repaint. Its `AppTimer` is owned
+solely by `flash_sync()` — every handler that can change `s_phone`, `s_connected` or
+`s_focused` calls it, and nothing else touches the handle. `flash_period()` is the
+single place that decides whether and how fast to flash, so it is also what makes
+ringing-then-answered re-arm at the new rate rather than keep the old one.
+
+It stops on every static state, on link loss, under a modal, and after a 120 s
+watchdog (which leaves the icon lit, just still). Reuse that single-owner pattern for
+any future animation, and note two `AppTimer` traps: `app_timer_cancel` invalidates
+the handle, and an elapsed timer must never be cancelled — which is why `flash_tick`
+nulls the handle as its first statement.
 
 ## SDK Documentation
 
@@ -110,7 +169,7 @@ Key Entry Points:
 
 ## Development Best Practices
 
-- Whenever making changes, run `pebble screenshot --scale 6` and view the screenshot to make sure it's what the user requested. If not, make more changes until it does what it's supposed to.
+- Whenever making changes, run `pebble screenshot --no-open <file>` and view the screenshot to make sure it's what the user requested. If not, make more changes until it does what it's supposed to.
 
 ## Emulator Button Control
 
