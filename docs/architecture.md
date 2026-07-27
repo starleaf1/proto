@@ -20,9 +20,12 @@ watch state changes:
 
 - **Time** — hours in Orbitron 54, rendered from a minute tick handler.
 - **Date** — Rajdhani Light 22.
-- **Status icons** — a Bluetooth-connection icon (from the connection service),
-  an **unread-message envelope**, and a **missed-call handset**. A battery gauge
-  (from the battery state service) sits just above the hour.
+- **Status icons** — an **unread-message envelope** and a **missed-call
+  handset**, drawn as a centered pair. The connection service gates the pair:
+  while the phone link is down neither icon is drawn, since both counts are
+  phone-fed and the watch has no current value for either.
+- **Battery gauge** — from the battery state service, just above the numeral.
+  The one indicator the watch computes itself, so the one that is always shown.
 
 The envelope and the missed-call handset are the only elements the watch cannot
 compute on its own. Pebble provides no on-watch API for the phone's notification
@@ -56,7 +59,8 @@ whenever they change.
    to the watch (either key may be sent on its own).
 3. The watchface's `inbox_received()` stores whichever values arrived and marks
    the root layer dirty.
-4. The next paint lights each icon when its count is `> 0`, leaves it unlit at `0`.
+4. The next paint lights each icon when its count is `> 0`, leaves it unlit at
+   `0` — and draws neither while the phone connection is down.
 
 The exact identifiers, buffer sizes, and delivery semantics are specified in
 [protocol.md](protocol.md). Because both sides share that one contract, a change

@@ -7,9 +7,13 @@
 // small radial hour hand whose tip sits a consistent 1px inside the dial. The
 // hand sweeps like an analog clock's — at 4:30 it points midway between the 4
 // and 5 marks. A battery gauge rides just above the numeral. Day/date/month on a
-// lighter line below, and a bottom row of three status icons (missed call /
-// unread message / bluetooth). Sporty 2000s-futurism vibe: electric-blue
+// lighter line below, and a bottom row of two companion-driven status icons
+// (missed call / unread message). Sporty 2000s-futurism vibe: electric-blue
 // highlight, techno-geometric Orbitron numeral, tach-style dial.
+//
+// The battery gauge is the only always-on indicator. Both status icons come from
+// the phone, so when the companion link is down the whole row is hidden rather
+// than showing counts the watch can no longer trust.
 //
 // All geometry derives from the root layer's bounds so it adapts to every
 // target platform (rectangular + round, B&W + color) with no hardcoded sizes.
@@ -214,52 +218,6 @@ static void draw_envelope(GContext *ctx, GPoint cp, int16_t hw, int16_t hh) {
   }
 }
 
-static void draw_bluetooth(GContext *ctx, GPoint cp, int16_t hw, int16_t hh) {
-  bool lit = !s_connected;
-  GColor col;
-  uint8_t sw = hh / 5;         // stroke scales with the icon (thicker on hi-res)
-  if (sw < 1) sw = 1;
-  if (lit) sw += 1;            // disconnected reads bolder
-#ifdef PBL_COLOR
-  col = lit ? GColorRed : GColorLightGray;   // red = "warning" when disconnected
-#else
-  col = GColorBlack;
-#endif
-  graphics_context_set_stroke_color(ctx, col);
-  graphics_context_set_stroke_width(ctx, sw);
-  // Bluetooth rune. Wide right triangles + shallow left notches, whose inner
-  // diagonals cross just right of the spine — the classic bluetooth look.
-  // (Equal-depth tips render as a stacked "8"; a separate spine reads as an
-  // asterisk — so neither.)
-  int16_t q  = hh / 2;
-  int16_t lw = hw / 2;                       // left notches shallower than right knees
-  GPoint A  = GPoint(cp.x, cp.y - hh);       // top
-  GPoint B  = GPoint(cp.x, cp.y + hh);       // bottom
-  GPoint P  = GPoint(cp.x + hw, cp.y - q);   // upper-right knee
-  GPoint Q  = GPoint(cp.x + hw, cp.y + q);   // lower-right knee
-  GPoint Lp = GPoint(cp.x - lw, cp.y - q);   // upper-left notch
-  GPoint Lq = GPoint(cp.x - lw, cp.y + q);   // lower-left notch
-  graphics_draw_line(ctx, A, B);   // spine
-  graphics_draw_line(ctx, A, P);
-  graphics_draw_line(ctx, P, Lq);
-  graphics_draw_line(ctx, B, Q);
-  graphics_draw_line(ctx, Q, Lp);
-
-  // Exclamation mark right of the rune — always present (root_update_proc
-  // reserves its slot so the row stays centered). Warning color + bold when
-  // disconnected; faded along with the rune when connected.
-  int16_t ex_cx  = cp.x + hw + hw / 2;        // sits in the reserved slot
-  int16_t bw     = sw + 1;                    // stem a touch bolder than the rune
-  int16_t stem_h = (hh * 6) / 5;              // stem from the top, ~60% of full height
-  graphics_context_set_fill_color(ctx, col);
-  graphics_fill_rect(ctx, GRect(ex_cx - bw / 2, cp.y - hh, bw, stem_h), 0, GCornerNone);
-  graphics_fill_circle(ctx, GPoint(ex_cx, cp.y + hh - bw), bw / 2 + 1);
-
-  if (!lit) {                                 // barely-visible when connected
-    fade_icon(ctx, GRect(cp.x - lw - 1, cp.y - hh - 1, 2 * hw + 4, 2 * hh + 2));
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Root render
 // ---------------------------------------------------------------------------
@@ -331,25 +289,22 @@ static void root_update_proc(Layer *layer, GContext *ctx) {
   graphics_draw_text(ctx, s_date_buf, s_date_font, date_box,
                      GTextOverflowModeFill, GTextAlignmentCenter, NULL);
 
-  // 5. Icon row — missed call / envelope / bluetooth, always all rendered.
-  // Each glyph has a different width (and bluetooth is drawn off-center from
-  // its own point), so equal center spacing leaves bluetooth adrift. Instead
-  // lay them out by their true left/right visual extents with a uniform gap,
-  // then center the whole group's span on c.x.
-  int16_t icon_cy = c.y + (R * 3) / 5;
-  int16_t mc_hw = R / 8,   env_hw = R / 8,  bt_hw = R / 12;
-  int16_t mc_l  = mc_hw,   mc_r  = mc_hw;
-  int16_t env_l = env_hw,  env_r = env_hw;
-  int16_t bt_l  = bt_hw / 2, bt_r = bt_hw + bt_hw;  // rune + always-present "!" to its right
-  int16_t gap = R / 6;
-  int16_t total = mc_l + mc_r + gap + env_l + env_r + gap + bt_l + bt_r;
-  int16_t x = c.x - total / 2;                       // left edge of the centered row
-  int16_t mc_cx  = x + mc_l;   x += mc_l + mc_r + gap;
-  int16_t env_cx = x + env_l;  x += env_l + env_r + gap;
-  int16_t bt_cx  = x + bt_l;
-  draw_missed_call(ctx, GPoint(mc_cx,  icon_cy), mc_hw,  R / 8);
-  draw_envelope(ctx,    GPoint(env_cx, icon_cy), env_hw, R / 12);
-  draw_bluetooth(ctx,   GPoint(bt_cx,  icon_cy), bt_hw,  R / 8);
+  // 5. Icon row — missed call + envelope, laid out by their visual extents with
+  // a uniform gap and centered as a pair on c.x. Both counts come from the
+  // companion over AppMessage, so a dropped link means the watch has no current
+  // value for either: hide the row entirely rather than show a stale count. The
+  // battery gauge above stays put — it is the one indicator the watch owns.
+  if (s_connected) {
+    int16_t icon_cy = c.y + (R * 3) / 5;
+    int16_t mc_hw = R / 8, env_hw = R / 8;
+    int16_t gap = R / 6;
+    int16_t total = 2 * mc_hw + gap + 2 * env_hw;
+    int16_t x = c.x - total / 2;                     // left edge of the centered row
+    int16_t mc_cx  = x + mc_hw;   x += 2 * mc_hw + gap;
+    int16_t env_cx = x + env_hw;
+    draw_missed_call(ctx, GPoint(mc_cx,  icon_cy), mc_hw,  R / 8);
+    draw_envelope(ctx,    GPoint(env_cx, icon_cy), env_hw, R / 12);
+  }
 }
 
 // ---------------------------------------------------------------------------

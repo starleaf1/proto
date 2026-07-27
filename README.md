@@ -3,12 +3,15 @@
 A Pebble watchface and its phone-side companion, developed together in one
 repository.
 
-The watchface shows the time, date, battery, Bluetooth-connection state, an
-**unread-message envelope**, and a **missed-call** indicator. Pebble exposes no
-on-watch API for a phone's notification count or call history, so those numbers
-are pushed to the watch by a companion app over Bluetooth. The companion is
-moving from a PebbleKit JS stub to a native **Android** app — this repo now
-houses both sides.
+The watchface shows the time, date, battery, an **unread-message envelope**, and
+a **missed-call** indicator. Pebble exposes no on-watch API for a phone's
+notification count or call history, so those numbers are pushed to the watch by
+a companion app over Bluetooth. The companion is moving from a PebbleKit JS stub
+to a native **Android** app — this repo now houses both sides.
+
+Because both icons are phone-fed, they are shown only while the companion link
+is up; when it drops, the whole icon row is hidden and the battery gauge is the
+only indicator left on screen.
 
 ## Repository layout
 
