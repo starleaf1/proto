@@ -26,7 +26,7 @@
 
 #define EDGE_MARGIN 3      // dial inset from the physical screen edge (px)
 // Flash half-periods in ms, i.e. how long one phase lasts. 125 ms per phase is a
-// 250 ms cycle = 4 Hz; 250 ms per phase is 2 Hz. Ringing is the faster, more
+// 250 ms cycle = 4 Hz; 500 ms per phase is 1 Hz. Ringing is the faster, more
 // urgent of the two.
 #define FLASH_RING_MS 250    // ringing — 2 Hz
 #define FLASH_CALL_MS 500    // call in progress — 1 Hz (B&W only; color shows steady green)
