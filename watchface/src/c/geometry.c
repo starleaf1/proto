@@ -3,12 +3,32 @@
 
 #define EDGE_MARGIN_MIN 3
 
+// Divide, rounding to the nearest integer instead of toward zero.
+//
+// Every point on this face is a trig product scaled back down by TRIG_MAX_RATIO, and
+// C's truncation biases each one — never symmetrically, always back toward where the
+// step started, by up to a whole pixel. A line's endpoint is a pixel address and there
+// is a nearest one; landing on it is the difference between a notch inner-end sitting
+// where the arithmetic says and sitting a pixel short of it.
+//
+// Signed on both operands: dx and dy below are direction cosines and are negative over
+// half the dial.
+static int32_t div_round(int32_t num, int32_t den) {
+  if (den < 0) { num = -num; den = -den; }
+  return (num >= 0) ? (num + den / 2) / den : (num - den / 2) / den;
+}
+
+int16_t stroke_px(int16_t w) {
+  if (w < 1) return 1;
+  return (w % 2) ? w : (int16_t)(w - 1);
+}
+
 #ifdef PBL_ROUND
 // Point at radius r, angle a. int32 math before the int16 cast avoids overflow —
 // sin_lookup * r reaches ~7M at gabbro's 125px radius.
 static GPoint point_on_circle(GPoint c, int32_t r, int32_t a) {
-  return GPoint(c.x + (int16_t)(sin_lookup(a) * r / TRIG_MAX_RATIO),
-                c.y - (int16_t)(cos_lookup(a) * r / TRIG_MAX_RATIO));
+  return GPoint(c.x + (int16_t)div_round(sin_lookup(a) * r, TRIG_MAX_RATIO),
+                c.y - (int16_t)div_round(cos_lookup(a) * r, TRIG_MAX_RATIO));
 }
 #else
 // Where a ray from center c at angle a exits rectangle r (already edge-inset).
@@ -19,11 +39,11 @@ static GPoint ray_rect_boundary(GRect r, GPoint c, int32_t a) {
   int16_t top   = r.origin.y, bot   = r.origin.y + r.size.h - 1;
   if (dx != 0) {                 // try a vertical edge first
     int16_t ex = (dx > 0) ? right : left;
-    int32_t ey = c.y + (int32_t)(ex - c.x) * dy / dx;
+    int32_t ey = c.y + div_round((int32_t)(ex - c.x) * dy, dx);
     if (ey >= top && ey <= bot) return GPoint(ex, (int16_t)ey);
   }
   int16_t ey2 = (dy > 0) ? bot : top;   // else it exits a horizontal edge
-  int32_t ex2 = c.x + (int32_t)(ey2 - c.y) * dx / dy;
+  int32_t ex2 = c.x + div_round((int32_t)(ey2 - c.y) * dx, dy);
   return GPoint((int16_t)ex2, ey2);
 }
 #endif
@@ -53,8 +73,8 @@ GPoint dial_boundary(GRect dial, GPoint c, int32_t a) {
 }
 
 GPoint step_in(GPoint p, int32_t a, int32_t d) {
-  return GPoint(p.x - (int16_t)(sin_lookup(a) * d / TRIG_MAX_RATIO),
-                p.y + (int16_t)(cos_lookup(a) * d / TRIG_MAX_RATIO));
+  return GPoint(p.x - (int16_t)div_round(sin_lookup(a) * d, TRIG_MAX_RATIO),
+                p.y + (int16_t)div_round(cos_lookup(a) * d, TRIG_MAX_RATIO));
 }
 
 int32_t depth_along_ray(GRect dial, GPoint boundary, int32_t a, int32_t d) {
@@ -76,13 +96,13 @@ int32_t depth_along_ray(GRect dial, GPoint boundary, int32_t a, int32_t d) {
   // The real worst case is the corner, a touch over 1.5x on both rectangular displays.
   // The floor is a guard against a degenerate angle, not a working limit.
   if (cos_t < TRIG_MAX_RATIO / 2) cos_t = TRIG_MAX_RATIO / 2;
-  return d * TRIG_MAX_RATIO / cos_t;
+  return div_round(d * TRIG_MAX_RATIO, cos_t);
 #endif
 }
 
 GPoint step_side(GPoint p, int32_t a, int32_t d) {
-  return GPoint(p.x + (int16_t)(cos_lookup(a) * d / TRIG_MAX_RATIO),
-                p.y + (int16_t)(sin_lookup(a) * d / TRIG_MAX_RATIO));
+  return GPoint(p.x + (int16_t)div_round(cos_lookup(a) * d, TRIG_MAX_RATIO),
+                p.y + (int16_t)div_round(sin_lookup(a) * d, TRIG_MAX_RATIO));
 }
 
 int deg_of_time(time_t t) {
@@ -125,7 +145,8 @@ static GPoint grow_from(GPoint p, GPoint c, int16_t d) {
   int32_t dx = p.x - c.x, dy = p.y - c.y;
   int16_t len = isqrt32(dx * dx + dy * dy);
   if (len == 0) return p;
-  return GPoint(p.x + (int16_t)(dx * d / len), p.y + (int16_t)(dy * d / len));
+  return GPoint(p.x + (int16_t)div_round(dx * d, len),
+                p.y + (int16_t)div_round(dy * d, len));
 }
 
 void draw_tri(GContext *ctx, GPoint p0, GPoint p1, GPoint p2,
@@ -185,8 +206,7 @@ void draw_radial_triangle(GContext *ctx, GRect dial, GPoint c, int32_t a,
   // marker keeps the same reach past the notch inner-ends at a corner as at an edge
   // midpoint. half_width is a width along the perimeter and is left alone.
   GPoint apex = step_in(base, a, depth_along_ray(dial, base, a, depth));
-  int16_t stroke_w = half_width / 3;
-  if (stroke_w < 1) stroke_w = 1;
+  int16_t stroke_w = stroke_px(half_width / 3);
   draw_tri(ctx, apex,
            step_side(base, a,  half_width),
            step_side(base, a, -half_width),

@@ -204,6 +204,16 @@ code; this is the index.
   is shortened by exactly that at the inner end. **Measure a band off a screenshot
   before trusting any depth constant here**; the arithmetic in the source is not what
   reaches the display.
+- **Every stroke width goes through `stroke_px()`, and comes back odd.** See
+  `geometry.h`. The SDK supports odd widths only — an even one is stored as asked but
+  the drawing routines round it down, so a requested 4 reaches the screen as 3 and
+  anything derived from the 4 is describing a line that was never drawn. Odd is also the
+  only width that sits square on the pixel grid, since only an odd count puts the same
+  number of pixels either side of the centre line; that is what keeps the four quarter
+  notches — the only exactly vertical and horizontal lines on the face — centred on
+  their own rays. Line *endpoints* are rounded to the nearest pixel for the same reason:
+  `div_round()` in `geometry.c` replaces C's truncation, which biased every stepped
+  point back toward where it started by up to a pixel.
 - **An upcoming band is shallower, not lighter.** See `dial.c`. The first version
   hatched it — a 1px radial line every other degree, a textbook half-tone — which was
   completely wrong here, because the notches are *also* 1px radial lines and the band

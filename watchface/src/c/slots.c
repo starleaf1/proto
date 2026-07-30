@@ -59,9 +59,12 @@ static const ManeuverPath MANEUVERS[] = {
   /* NAV_UTURN        */ { 4, {{14,32},{14,-14},{-14,-14},{-14,0}},   {  0, 10} },
 };
 
+// Every glyph stroke goes through stroke_px(). These shapes are mostly axis-aligned —
+// the maneuver shafts, the phone's outline, the battery's rect — and an even width puts
+// each of those straight edges half a pixel off the grid on top of being quietly
+// narrowed by the renderer. See geometry.h.
 static int16_t sw_for(int16_t side) {
-  int16_t w = side / 9;
-  return w < 2 ? 2 : w;
+  return stroke_px(side / 9);
 }
 
 static GPoint grid_pt(GPoint c, int16_t side, int gx, int gy) {
@@ -132,8 +135,7 @@ static void glyph_phone(GContext *ctx, GRect box, bool slashed, GColor ink) {
   int16_t side = box.size.w < box.size.h ? box.size.w : box.size.h;
   int16_t w = side * 58 / 100;
   int16_t h = side * 92 / 100;
-  int16_t sw = side / 12;
-  if (sw < 2) sw = 2;
+  int16_t sw = stroke_px(side / 12);
 
   GRect body = GRect(c.x - w / 2, c.y - h / 2, w, h);
   graphics_context_set_stroke_color(ctx, ink);
@@ -167,7 +169,7 @@ static void glyph_battery(GContext *ctx, GRect box, GColor ink) {
 
   GRect body = GRect(c.x - w / 2 - nub / 2, c.y - h / 2, w, h);
   graphics_context_set_stroke_color(ctx, ink);
-  graphics_context_set_stroke_width(ctx, side / 14 < 1 ? 1 : side / 14);
+  graphics_context_set_stroke_width(ctx, stroke_px(side / 14));
   graphics_draw_rect(ctx, body);
   graphics_context_set_fill_color(ctx, ink);
   graphics_fill_rect(ctx, GRect(body.origin.x + body.size.w, c.y - h / 4, nub, h / 2),
@@ -189,8 +191,7 @@ static void glyph_calendar(GContext *ctx, GRect box, bool progress, int pct, GCo
   GPoint c = grect_center_point(&box);
   int16_t side = box.size.w < box.size.h ? box.size.w : box.size.h;
 
-  int16_t sw = side / 14;
-  if (sw < 1) sw = 1;
+  int16_t sw = stroke_px(side / 14);
   int16_t tab_h = side / 7;
   if (tab_h < 2) tab_h = 2;
   int16_t tab_w = sw < 2 ? 2 : sw;

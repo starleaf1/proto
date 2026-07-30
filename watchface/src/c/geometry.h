@@ -34,6 +34,21 @@ Layout layout_compute(GRect bounds, GFont num_font, GFont date_font,
 // platform. See the note in geometry.c on what that costs and what it must not cost.
 GPoint dial_boundary(GRect dial, GPoint c, int32_t a);
 
+// A stroke width the display can actually draw, and the only kind that lands square on
+// the pixel grid. Rounds down to odd.
+//
+// The SDK supports odd widths only: an even one is stored as given but the drawing
+// routines round it down, so asking for 4 puts 3 on the screen and any arithmetic
+// derived from the 4 — a cap overshoot, a rect inset — is describing a line that was
+// never drawn. Odd is also what a stroke has to be to sit on whole pixels, since only
+// an odd count can put the same number either side of the centre line; an even one
+// straddles a boundary and the renderer has to pick a side.
+//
+// Down rather than up, so what reaches the display is unchanged and it is the source
+// that stops overstating itself. Every graphics_context_set_stroke_width() on this face
+// goes through here.
+int16_t stroke_px(int16_t w);
+
 // Move p toward the center along the ray at angle a by d px.
 //
 // Every marker depth on this face is expressed through this, in pixels — never as a

@@ -146,7 +146,11 @@ static void draw_bands(GContext *ctx, const Layout *lo) {
   // centre — 2.55px per degree — so three pixels closes every gap on all three
   // displays. The depth is a pixel count, so the band stays this thick from its outer
   // edge to its inner one at every angle, corners included.
-  int16_t stroke = 2 + lo->radius / 64;
+  //
+  // Through stroke_px() because the cap below is derived from this number and has to be
+  // derived from the width that is actually drawn: gabbro asked for 4, got 3, and then
+  // shortened the line by a 2px cap that only ever overshot by 1.
+  int16_t stroke = stroke_px(2 + lo->radius / 64);
   graphics_context_set_stroke_width(ctx, stroke);
   graphics_context_set_stroke_color(ctx, COL_BAND);
 
@@ -193,10 +197,13 @@ static bool notch_inverts(int deg) {
 }
 
 static void draw_notches(GContext *ctx, const Layout *lo) {
-  int16_t hour_w = lo->radius / 24;
-  if (hour_w < 2) hour_w = 2;
-  int16_t min_w = lo->radius / 90;
-  if (min_w < 1) min_w = 1;
+  // Odd, so a notch sits centred on its own ray rather than a pixel to one side of it —
+  // which is what the four quarter notches need most, being the only exactly vertical
+  // and horizontal lines on the face. The hour floor is 3 rather than 2 for the same
+  // reason: 2 draws as 1, which is the minute notches' weight.
+  int16_t hour_w = stroke_px(lo->radius / 24);
+  if (hour_w < 3) hour_w = 3;
+  int16_t min_w = stroke_px(lo->radius / 90);
 
   for (int i = 0; i < 60; i++) {
     int32_t a = TRIG_MAX_ANGLE * i / 60;
@@ -289,7 +296,7 @@ void dial_draw_now(GContext *ctx, const Layout *lo, const struct tm *t) {
   GPoint apex = step_in(edge, a, tip);
   GPoint base = step_in(edge, a, tip + len);
   draw_tri(ctx, apex, step_side(base, a, phw), step_side(base, a, -phw),
-           COL_INDEX, true, 2, true);
+           COL_INDEX, true, 1, true);   // filled: the stroke width is unused
 }
 
 // Outward to inward, except for where the notch ring sits in the stack.
