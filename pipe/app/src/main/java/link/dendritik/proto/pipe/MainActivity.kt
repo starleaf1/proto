@@ -1,21 +1,19 @@
 package link.dendritik.proto.pipe
 
-import android.content.Intent
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
-import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
@@ -28,44 +26,36 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.core.app.NotificationManagerCompat
-import com.getpebble.android.kit.PebbleKit
-import link.dendritik.proto.pipe.config.IconCategory
-import link.dendritik.proto.pipe.config.PipeConfig
-import link.dendritik.proto.pipe.protocol.IconState
-import link.dendritik.proto.pipe.protocol.PhoneState
+import androidx.core.content.ContextCompat
 import link.dendritik.proto.pipe.ui.theme.ProtoPipeTheme
 
 /**
- * Diagnostics, plus the one thing the user must do by hand: grant notification
- * access. The bridge itself is [link.dendritik.proto.pipe.notify.ProtoNotificationListener] —
- * this screen never sends anything to the watch.
+ * Diagnostics, and the two grants the service cannot get for itself.
+ *
+ * Calendar access is a runtime permission and notification access is needed for the
+ * foreground service's own notification, so unlike the previous design there is
+ * actual permission machinery here rather than a single jump to a settings screen.
  */
 class MainActivity : ComponentActivity() {
 
-    // Both can change while we are backgrounded — the user may grant access in
-    // Settings, the watch may connect — so they are re-read in onResume rather than
-    // observed. Cheap reads, and it keeps the screen free of a lifecycle dependency.
-    private var accessGranted by mutableStateOf(false)
-    private var watchConnected by mutableStateOf(false)
+    private var calendarGranted by mutableStateOf(false)
+    private var notificationsGranted by mutableStateOf(true)
+
+    private val requestPermissions = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { refresh(); maybeStart() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             ProtoPipeTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { padding ->
+                Scaffold(modifier = Modifier.fillMaxSize()) { insets ->
                     StatusScreen(
-                        accessGranted = accessGranted,
-                        watchConnected = watchConnected,
-                        listenerBound = PipeStatus.listenerConnected,
-                        state = PipeStatus.state,
-                        modifier = Modifier
-                            .padding(padding)
-                            .padding(16.dp),
-                        onGrantAccess = {
-                            startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-                        },
+                        modifier = Modifier.padding(insets),
+                        calendarGranted = calendarGranted,
+                        notificationsGranted = notificationsGranted,
+                        onGrant = ::ask,
                     )
                 }
             }
@@ -74,111 +64,98 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        accessGranted = NotificationManagerCompat
-            .getEnabledListenerPackages(this)
-            .contains(packageName)
-        watchConnected = runCatching { PebbleKit.isWatchConnected(this) }.getOrDefault(false)
+        refresh()
+        maybeStart()
+    }
+
+    private fun refresh() {
+        calendarGranted = granted(Manifest.permission.READ_CALENDAR)
+        notificationsGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            granted(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            true
+        }
+        PipeStatus.calendarGranted = calendarGranted
+    }
+
+    private fun granted(permission: String) =
+        ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+
+    private fun ask() {
+        val wanted = buildList {
+            if (!calendarGranted) add(Manifest.permission.READ_CALENDAR)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !notificationsGranted) {
+                add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+        if (wanted.isNotEmpty()) requestPermissions.launch(wanted.toTypedArray())
+    }
+
+    /**
+     * Starting is idempotent, so this runs on every resume rather than only once —
+     * that is what recovers the service after the system has killed it.
+     */
+    private fun maybeStart() {
+        if (calendarGranted) PipeService.start(this)
     }
 }
 
 @Composable
 private fun StatusScreen(
-    accessGranted: Boolean,
-    watchConnected: Boolean,
-    listenerBound: Boolean,
-    state: IconState,
     modifier: Modifier = Modifier,
-    onGrantAccess: () -> Unit,
+    calendarGranted: Boolean,
+    notificationsGranted: Boolean,
+    onGrant: () -> Unit,
 ) {
-    Column(modifier = modifier.verticalScroll(rememberScrollState())) {
-        Text("ProtoPipe", style = MaterialTheme.typography.headlineMedium)
+    Column(
+        modifier = modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text("proto", style = MaterialTheme.typography.headlineMedium)
         Text(
-            "Bridges phone notifications to the proto watchface.",
+            "Sends your next six hours to the watch.",
             style = MaterialTheme.typography.bodyMedium,
         )
-        Spacer(Modifier.height(20.dp))
 
-        SectionCard("Connections") {
-            StatusRow("Notification access", if (accessGranted) "Granted" else "Not granted")
-            StatusRow("Listener bound", yesNo(listenerBound))
-            StatusRow("Watch connected", yesNo(watchConnected))
-        }
-
-        if (!accessGranted) {
-            Spacer(Modifier.height(12.dp))
-            Text(
-                "ProtoPipe cannot read notifications until you grant it notification " +
-                    "access. Notification text stays on this device — only three counters " +
-                    "are ever sent to the watch.",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Spacer(Modifier.height(8.dp))
-            Button(onClick = onGrantAccess) { Text("Open notification access settings") }
-        }
-
-        Spacer(Modifier.height(20.dp))
-        SectionCard("Sent to watch") {
-            StatusRow(
-                "Envelope",
-                if (state.unreadCount > 0) "Lit (${state.unreadCount})" else "Faded",
-            )
-            StatusRow("Phone icon", state.phone.describe())
-            StatusRow("Missed calls", state.missedCount.toString())
-        }
-
-        Spacer(Modifier.height(20.dp))
-        SectionCard("Routing") {
-            Text(
-                "Silent notifications are ignored, except a call already in progress.",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Spacer(Modifier.height(8.dp))
-            PipeConfig.DEFAULT.rules.forEach { rule ->
-                val icons = buildList {
-                    if (rule.chatChannels.isNotEmpty() || rule.fallback == IconCategory.CHAT) {
-                        add("envelope")
-                    }
-                    if (rule.callChannels.isNotEmpty() || rule.fallback == IconCategory.CALL) {
-                        add("phone")
-                    }
-                }
-                StatusRow(rule.label, icons.joinToString(" + "))
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Permissions", style = MaterialTheme.typography.titleMedium)
+                StatusRow("Calendar access", calendarGranted)
+                StatusRow("Notifications", notificationsGranted)
             }
         }
-        Spacer(Modifier.height(24.dp))
-    }
-}
 
-private fun yesNo(value: Boolean) = if (value) "Yes" else "No"
-
-private fun PhoneState.describe() = when (this) {
-    PhoneState.IDLE -> "Faded (idle)"
-    PhoneState.ONGOING -> "Green (call in progress)"
-    PhoneState.RINGING -> "Flashing (ringing)"
-    PhoneState.MISSED -> "Red (missed call)"
-}
-
-@Composable
-private fun SectionCard(title: String, content: @Composable () -> Unit) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(10.dp))
-            content()
+        if (!calendarGranted || !notificationsGranted) {
+            Button(onClick = onGrant, modifier = Modifier.fillMaxWidth()) {
+                Text("Grant access")
+            }
         }
+
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Status", style = MaterialTheme.typography.titleMedium)
+                StatusRow("Service running", PipeStatus.running)
+                StatusRow("Watch connected", PipeStatus.watchConnected)
+                Text("Entries in window: ${PipeStatus.eventCount}")
+            }
+        }
+
+        Text(
+            "Whole-day entries are ignored — they have no position on the dial. " +
+                "An entry without a duration is drawn as a reminder.",
+            style = MaterialTheme.typography.bodySmall,
+        )
     }
 }
 
 @Composable
-private fun StatusRow(label: String, value: String) {
+private fun StatusRow(label: String, ok: Boolean) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 3.dp),
+        Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, style = MaterialTheme.typography.bodyMedium)
-        Text(value, style = MaterialTheme.typography.bodyMedium)
+        Text(label)
+        Text(if (ok) "yes" else "no", style = MaterialTheme.typography.labelLarge)
     }
 }

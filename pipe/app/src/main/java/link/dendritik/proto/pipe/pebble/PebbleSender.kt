@@ -6,65 +6,59 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import androidx.core.content.ContextCompat
 import com.getpebble.android.kit.Constants
 import com.getpebble.android.kit.PebbleKit
 import com.getpebble.android.kit.util.PebbleDictionary
-import link.dendritik.proto.pipe.protocol.IconState
-import link.dendritik.proto.pipe.protocol.PhoneState
+import link.dendritik.proto.pipe.calendar.EventFacts
+import link.dendritik.proto.pipe.protocol.EventOp
+import link.dendritik.proto.pipe.protocol.NavState
 import link.dendritik.proto.pipe.protocol.Protocol
 
 /**
- * Pushes [IconState] to the watch, obeying the two delivery rules in
- * `docs/protocol.md`: send on change rather than on a timer, and coalesce to the
- * latest value instead of queueing every intermediate one.
+ * Everything that reaches the watch goes through here.
  *
- * Coalescing matters more than it looks. Dismissing a stack of chats produces one
- * `onNotificationRemoved` per notification within a few milliseconds; without the
- * debounce that is one Bluetooth round trip each, all but the last already stale.
+ * Send on change, never on a timer — with one exception. The watch raises a
+ * companion-down alert when it stops hearing from us, because a companion that has
+ * crashed or lost its permissions is otherwise indistinguishable from one with no
+ * news. So when nothing has changed for a while we speak anyway, purely as proof of
+ * life, at the cadence declared in [Protocol.KEY_HEARTBEAT]. Every message carries
+ * that key, so ordinary traffic doubles as a heartbeat and the explicit one only
+ * fires during genuine silence.
  *
- * The one exception to send-on-change is the **heartbeat**. The watch hides its icon
- * row when it stops hearing from us, because a companion that has crashed or lost
- * notification access is otherwise indistinguishable from one with no news. So when
- * nothing has changed for a while we re-send the current state anyway, purely as
- * proof of life, at the cadence declared in [Protocol.KEY_HEARTBEAT]. Every message
- * carries that key, so ordinary traffic doubles as a heartbeat and the explicit one
- * only fires during genuine silence.
- *
- * Not thread-safe by design — every caller is the listener's main thread.
+ * Not thread-safe: every caller is [link.dendritik.proto.pipe.PipeService] on the
+ * main thread.
  */
 class PebbleSender(private val context: Context) {
 
     private val handler = Handler(Looper.getMainLooper())
     private val alarms = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-    private var pending: IconState = IconState.IDLE
-    private var lastSent: IconState? = null
+
+    /** Called when the watch reconnects, so the host can order a full re-sync. */
+    var onWatchConnected: (() -> Unit)? = null
+
+    private var nav: NavState = NavState.NONE
+    private var sentNav: NavState? = null
+    private var battery: Int = -1
+    private var sentBattery: Int? = null
+
+    /** What we believe the watch's event table holds, so a scan can be diffed. */
+    private var sentEvents: Map<Int, EventFacts> = emptyMap()
+
     private var linkReceiver: BroadcastReceiver? = null
     private var beatReceiver: BroadcastReceiver? = null
 
-    private val flush = Runnable { transmit() }
-    private val beat = Runnable { transmit(force = true) }
+    private val flushScalars = Runnable { transmitScalars(force = false) }
+    private val beat = Runnable { transmitScalars(force = true) }
 
-    /** Note the newest state; it reaches the watch once the burst settles. */
-    fun submit(state: IconState) {
-        pending = state
-        handler.removeCallbacks(flush)
-        handler.postDelayed(flush, DEBOUNCE_MS)
-    }
+    // ---------------------------------------------------------------------------
+    // Lifecycle
+    // ---------------------------------------------------------------------------
 
-    /**
-     * Start listening for the watch coming and going, and for our own heartbeat alarm.
-     *
-     * The watchface holds no persistent state — every count resets to zero when it
-     * launches or the watch reboots — so a reconnect means whatever we last sent is
-     * gone and must be re-sent even though it has not changed. A disconnect means the
-     * opposite: stand down completely, because the watch detects Bluetooth loss by
-     * itself and has already hidden the row.
-     */
     fun start() {
         if (linkReceiver != null) return
 
@@ -73,109 +67,173 @@ class PebbleSender(private val context: Context) {
                 if (intent.action == Constants.INTENT_PEBBLE_DISCONNECTED) {
                     Log.i(TAG, "watch disconnected; standing down")
                     cancelHeartbeat()
-                    lastSent = null
+                    sentNav = null
+                    sentBattery = null
+                    // Forget what the watch holds. It persists nothing across a
+                    // watchface relaunch, so on reconnect the only correct move is a
+                    // full flush; pretending we still know its table would send a
+                    // diff against a phantom.
+                    sentEvents = emptyMap()
                 } else {
-                    Log.i(TAG, "watch connected; re-sending current state")
-                    lastSent = null      // force a send even if nothing changed
-                    submit(pending)
+                    Log.i(TAG, "watch connected; re-syncing")
+                    onWatchConnected?.invoke()
                 }
             }
         }
-        val linkFilter = IntentFilter(Constants.INTENT_PEBBLE_CONNECTED).apply {
+        val filter = IntentFilter(Constants.INTENT_PEBBLE_CONNECTED).apply {
             addAction(Constants.INTENT_PEBBLE_DISCONNECTED)
         }
         // PebbleKit's own registerPebbleConnectedReceiver() predates Android 14 and
         // omits the exported flag, which is a hard SecurityException at targetSdk 34+.
         // Register it ourselves: the broadcast comes from the Pebble app, not us.
-        register(link, linkFilter, exported = true)
+        ContextCompat.registerReceiver(context, link, filter, ContextCompat.RECEIVER_EXPORTED)
         linkReceiver = link
 
-        // The heartbeat alarm, by contrast, is ours alone — nobody outside this app has
-        // any business firing it. Registering it at runtime rather than in the manifest
-        // is also the semantically correct choice: a manifest receiver would restart a
-        // dead process just to announce that it is alive, which is the one thing the
-        // heartbeat must never be able to claim.
         val bt = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) = beat.run()
         }
-        register(bt, IntentFilter(ACTION_HEARTBEAT), exported = false)
+        ContextCompat.registerReceiver(
+            context, bt, IntentFilter(ACTION_HEARTBEAT), ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
         beatReceiver = bt
     }
 
     fun stop() {
-        handler.removeCallbacks(flush)
+        handler.removeCallbacks(flushScalars)
         cancelHeartbeat()
         linkReceiver = unregister(linkReceiver)
         beatReceiver = unregister(beatReceiver)
     }
 
     /** True if the Pebble app reports a paired, connected watch. */
-    fun isWatchConnected(): Boolean = runCatching {
-        PebbleKit.isWatchConnected(context)
-    }.getOrDefault(false)
+    fun isWatchConnected(): Boolean =
+        runCatching { PebbleKit.isWatchConnected(context) }.getOrDefault(false)
 
-    private fun transmit(force: Boolean = false) {
-        val state = pending
-        if (!force && state == lastSent) return
+    // ---------------------------------------------------------------------------
+    // Submissions
+    // ---------------------------------------------------------------------------
 
-        // No Bluetooth, no heartbeat. The watch learns about link loss from its own
-        // connection service and hides the row without our help, so a proof of life
-        // has nothing to prove and nobody to reach. INTENT_PEBBLE_CONNECTED starts
-        // us again; until then, treat whatever the watch held as gone.
+    fun submitNav(next: NavState) {
+        nav = next
+        schedule()
+    }
+
+    fun submitBattery(percent: Int) {
+        battery = percent
+        schedule()
+    }
+
+    /**
+     * Reconciles the watch's event table with [events].
+     *
+     * With [flush] the watch is told to drop everything first and the whole scan goes
+     * over — that is the reconnect path, and the only one that recovers from a
+     * watchface relaunch. Otherwise only the difference is sent.
+     */
+    fun syncCalendar(events: List<EventFacts>, flush: Boolean) {
         if (!isWatchConnected()) {
             cancelHeartbeat()
-            lastSent = null
             return
         }
+        val records = if (flush) {
+            events.map { EventBlob.Record(it, EventOp.UPSERT) }
+        } else {
+            EventDiff.diff(sentEvents, events)
+        }
+        if (records.isEmpty() && !flush) return
 
-        val period = heartbeatPeriodFor(state)
+        val chunks = EventBlob.chunk(records)
+        val period = heartbeatPeriod()
+        chunks.forEachIndexed { i, blob ->
+            var flags = 0
+            if (flush && i == 0) flags = flags or Protocol.CAL_FLUSH
+            if (i < chunks.lastIndex) flags = flags or Protocol.CAL_MORE
+            val dict = PebbleDictionary().apply {
+                addBytes(Protocol.KEY_CAL_EVENTS, blob)
+                addInt32(Protocol.KEY_CAL_FLAGS, flags)
+                addInt32(Protocol.KEY_HEARTBEAT, period)
+            }
+            // Bail on the first failure rather than pressing on: the remaining chunks
+            // belong to a sync the watch will never see the start of, and leaving
+            // sentEvents untouched makes the next pass redo the whole thing.
+            if (!send(dict)) return
+        }
+        sentEvents = events.associateBy { it.id }
+        Log.i(
+            TAG,
+            "calendar ${if (flush) "flush" else "delta"}: " +
+                "${records.size} record(s) in ${chunks.size} message(s)",
+        )
+        scheduleHeartbeat(period)
+    }
+
+    /** Note the newest scalar state; it reaches the watch once the burst settles. */
+    private fun schedule() {
+        handler.removeCallbacks(flushScalars)
+        handler.postDelayed(flushScalars, DEBOUNCE_MS)
+    }
+
+    private fun transmitScalars(force: Boolean) {
+        if (!isWatchConnected()) {
+            cancelHeartbeat()
+            sentNav = null
+            sentBattery = null
+            return
+        }
+        // A heartbeat re-sends the current values rather than an empty message, so a
+        // beat arriving after a dropped send doubles as the retry.
+        if (!force && nav == sentNav && battery == sentBattery) return
+
+        val period = heartbeatPeriod()
         val dict = PebbleDictionary().apply {
-            // Addressed by numeric id: Android never sees the watch's key names.
-            addInt32(Protocol.KEY_UNREAD_COUNT, state.unreadCount.coerceAtLeast(0))
-            addInt32(Protocol.KEY_MISSED_COUNT, state.missedCount.coerceAtLeast(0))
-            addInt32(Protocol.KEY_PHONE_STATE, state.phone.wire)
+            addInt32(Protocol.KEY_NAV_MANEUVER, nav.maneuver.wire)
+            addInt32(Protocol.KEY_NAV_DISTANCE, nav.distanceTenths.coerceAtLeast(0))
+            addInt32(Protocol.KEY_NAV_UNIT, nav.unit.wire)
+            addInt32(Protocol.KEY_PHONE_BATTERY, battery.coerceIn(-1, 100))
             addInt32(Protocol.KEY_HEARTBEAT, period)
         }
-        try {
-            PebbleKit.sendDataToPebble(context, Protocol.APP_UUID, dict)
-            lastSent = state
-            Log.i(
-                TAG,
-                "sent unread=${state.unreadCount} missed=${state.missedCount} " +
-                    "phone=${state.phone} next=${period}s",
-            )
-        } catch (e: IllegalArgumentException) {
-            // Leave lastSent alone so the next change retries this value. Still arm the
-            // heartbeat: it is now the retry path as well, and the watch's 2.5-period
-            // grace absorbs a single miss without blanking anything.
-            Log.w(TAG, "send failed, will retry on next change or heartbeat", e)
+        if (send(dict)) {
+            sentNav = nav
+            sentBattery = battery
         }
         scheduleHeartbeat(period)
     }
 
+    private fun send(dict: PebbleDictionary): Boolean = try {
+        PebbleKit.sendDataToPebble(context, Protocol.APP_UUID, dict)
+        true
+    } catch (e: IllegalArgumentException) {
+        // What PebbleKit throws for a malformed or oversized dictionary. Nothing is
+        // marked as sent: the next change or the next heartbeat retries, and the
+        // watch's 2.5-period grace absorbs a single miss without raising an alert.
+        Log.w(TAG, "send failed, will retry on next change or heartbeat", e)
+        false
+    }
+
+    // ---------------------------------------------------------------------------
+    // Heartbeat
+    // ---------------------------------------------------------------------------
+
     /**
-     * How long we may stay silent in this state. See [Protocol.HEARTBEAT_LIVE_S] for
-     * why a live call is the only state that earns the fast tier.
+     * How long we may stay silent. Active navigation is the only state that earns the
+     * fast tier — see [Protocol.HEARTBEAT_LIVE_S].
      */
-    private fun heartbeatPeriodFor(state: IconState): Int =
-        when (state.phone) {
-            PhoneState.ONGOING, PhoneState.RINGING -> Protocol.HEARTBEAT_LIVE_S
-            else -> Protocol.HEARTBEAT_IDLE_S
-        }
+    private fun heartbeatPeriod(): Int =
+        if (nav.active) Protocol.HEARTBEAT_LIVE_S else Protocol.HEARTBEAT_IDLE_S
 
     private fun scheduleHeartbeat(periodS: Int) {
         cancelHeartbeat()
         val delayMs = periodS * 1000L
         if (periodS <= Protocol.HEARTBEAT_LIVE_S) {
             // Fast tier. A plain handler post is free and exact, and it only fails if
-            // the CPU suspends — which, during a live call, it does not.
+            // the CPU suspends — which, mid-navigation, it does not.
             handler.postDelayed(beat, delayMs)
         } else {
             // Slow tier. setAndAllowWhileIdle is the only scheduler that survives Doze
-            // without SCHEDULE_EXACT_ALARM, which Android 14 no longer grants by default
-            // and which Play reserves for actual alarm-clock apps. It must be a _WAKEUP
-            // alarm: the non-waking variant would sit until the device stirred for some
-            // other reason, which can be hours, and the watch would blank meanwhile.
+            // without SCHEDULE_EXACT_ALARM, which Android 14 no longer grants by
+            // default and which Play reserves for actual alarm-clock apps. It must be
+            // a _WAKEUP alarm: the non-waking variant would sit until the device
+            // stirred for some other reason, which can be hours.
             alarms.setAndAllowWhileIdle(
                 AlarmManager.ELAPSED_REALTIME_WAKEUP,
                 SystemClock.elapsedRealtime() + delayMs,
@@ -190,25 +248,16 @@ class PebbleSender(private val context: Context) {
     }
 
     /**
-     * Kept implicit-but-package-scoped rather than explicit, since the receiver is
-     * registered at runtime and so has no component name to target.
+     * Implicit but package-scoped: the receiver is registered at runtime and so has no
+     * component name to target. Deliberately not a manifest receiver — that would
+     * restart a dead process just to announce that it is alive, which is the one thing
+     * a heartbeat must never be able to claim.
      */
     private fun heartbeatIntent(): PendingIntent = PendingIntent.getBroadcast(
-        context,
-        0,
+        context, 0,
         Intent(ACTION_HEARTBEAT).setPackage(context.packageName),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
-
-    private fun register(receiver: BroadcastReceiver, filter: IntentFilter, exported: Boolean) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val flag = if (exported) Context.RECEIVER_EXPORTED else Context.RECEIVER_NOT_EXPORTED
-            context.registerReceiver(receiver, filter, flag)
-        } else {
-            @Suppress("UnspecifiedRegisterReceiverFlag")
-            context.registerReceiver(receiver, filter)
-        }
-    }
 
     private fun unregister(receiver: BroadcastReceiver?): BroadcastReceiver? {
         receiver?.let { runCatching { context.unregisterReceiver(it) } }
@@ -216,14 +265,8 @@ class PebbleSender(private val context: Context) {
     }
 
     private companion object {
-        const val TAG = "PipeSender"
-
-        /**
-         * Long enough to swallow a dismiss-all burst, short enough that the watch
-         * still feels immediate.
-         */
+        const val TAG = "PebbleSender"
         const val DEBOUNCE_MS = 250L
-
         const val ACTION_HEARTBEAT = "link.dendritik.proto.pipe.HEARTBEAT"
     }
 }

@@ -1,83 +1,104 @@
 # Contributing
 
-`proto` is a monorepo with two components that share one protocol. Work inside
-the component you're changing; touch the protocol only when both sides move
-together.
+`proto` is a monorepo with two components that share one protocol. Work inside the
+component you're changing; touch the protocol only when both sides move together.
 
 ## Repository layout
 
 ```
 proto/
   watchface/   Pebble watchapp (C, Pebble SDK)
-  pipe/        Android companion (Kotlin, notification listener)
+  pipe/        Android companion (Kotlin, calendar reader)
   docs/        Architecture + protocol contract
 ```
 
 ## Watchface (`watchface/`)
 
-**Prerequisites:** the [Pebble SDK](https://developer.repebble.com) and its
-`pebble` CLI.
-
-Run all `pebble` commands from `watchface/`:
+**Prerequisites:** the [Pebble SDK](https://developer.repebble.com) and its `pebble`
+CLI. Run every command from `watchface/`.
 
 ```sh
-cd watchface
-pebble build                      # build for every target platform
-pebble install --emulator emery   # run in an emulator
-pebble screenshot --no-open s.png # capture the running emulator
+pebble build                             # all three target platforms
+PROTO_DEMO=1 pebble build                # with synthetic calendar entries
+pebble install --emulator flint          # or emery, or gabbro
+pebble screenshot --no-open s.png
 ```
 
 In a headless environment (no window server), add `--vnc` to every command that
-touches the emulator. See [watchface/CLAUDE.md](watchface/CLAUDE.md) for the
-full command reference and emulator-button control.
+touches the emulator.
 
 **Verify UI changes with a screenshot.** After changing anything visual, build,
-install, and screenshot the emulator before considering the change done.
+install and screenshot the emulator before considering the change done — and do it on
+`flint` as well as a colour platform. Most of the design's prominence cues exist
+specifically so that the black-and-white platform still works, and a change that reads
+beautifully on `gabbro` can be invisible on `flint`.
+
+**Seed the calendar with `watchface/tools/send-demo-events.py`.** It packs the
+`CalEvents` blob and sends it to a running watchface, covering every marker case — a
+running band, two overlapping bands that must flatten, clustered point entries, an
+overdue reminder, and a marker sitting on top of a band. `--clear` and `--remove` drive
+the flush and delta paths.
+
+`PROTO_DEMO=1 pebble build` compiles the same set in, for tooling older than
+pebble-tool 5.0.39, which is where `send-app-message --bytes` arrived. Keep
+`demo_seed()` in `src/c/proto.c` and `DEMO` in the script in step, and never ship a
+build with the flag set.
+
+Everything else is CLI-drivable too — see the snippets at the end of `docs/protocol.md`.
 
 ## Android companion (`pipe/`)
 
-**Prerequisites:** JDK 21 and the Android SDK. Run all Gradle commands from
-`pipe/`:
+**Prerequisites:** JDK 21 and the Android SDK.
 
 ```sh
-cd pipe
-./gradlew assembleDebug           # build the debug APK
-./gradlew test                    # unit tests — the routing decision table
+./gradlew assembleDebug
+./gradlew test              # the wire format and the scan diff
+./gradlew installDebug
 ```
 
 No JDK on your PATH? Android Studio ships one:
 `JAVA_HOME=~/android-studio/jbr ./gradlew test`.
 
-The routing logic is deliberately pure — `Classifier` and `ActiveSet` take plain
-`NotificationFacts`, not framework objects, so the whole decision table is covered
-by JVM unit tests with no device or Robolectric. **Add a test case there when you
-touch routing**; a channel-id pattern is easy to get subtly wrong and impossible to
-notice by hand. See [pipe/README.md](pipe/README.md).
+**Run `clean` before trusting a green build.** Kotlin's incremental compiler will
+happily report success from cached outputs after a source file has been deleted, which
+is exactly the situation a refactor creates: `./gradlew clean assembleDebug test`.
 
-## The protocol
+**Keep the wire format pure and tested.** `EventBlob`, `EventDiff` and everything they
+touch take plain `EventFacts`, not framework objects, so the whole format is covered by
+JVM unit tests with no device and no Robolectric. Framework types stop at
+`CalendarSource`. **Add a test case when you touch packing or diffing** — a byte
+offset is easy to get subtly wrong and impossible to notice by hand, and the symptom
+shows up as markers in the wrong place on a watch.
 
-The watch and phone share four AppMessage keys documented in
-[docs/protocol.md](docs/protocol.md). Before changing the UUID, a message key
-or its numeric id, the value type, or the AppMessage buffer sizes:
+## Changing the protocol
 
-1. Update [docs/protocol.md](docs/protocol.md).
-2. Change **both** `watchface/` and `pipe/` in the same commit/PR.
+1. Update `docs/protocol.md`.
+2. Change **both** `watchface/` and `pipe/` in the same commit.
 3. Keep the numeric key ids in `pipe/.../protocol/Protocol.kt` in sync with
-   `watchface/build/appinfo.json`.
+   `watchface/build/appinfo.json`. Android addresses keys by integer and never sees
+   the names.
 4. **Append** new keys to `messageKeys` in `watchface/package.json` — ids are
-   positional from 10000, so inserting one shifts every id after it. Run
-   `pebble clean` after adding a key, or the generated `MESSAGE_KEY_*` symbol
-   comes back undeclared.
-
-Keep policy on the phone and rendering on the watch: send a state enum, never a
-colour or a blink frame. Three of the seven target platforms are black-and-white,
-and only the watch knows which one it is.
+   positional from 10000, so inserting one silently renumbers everything after it.
+5. Run `pebble clean` after adding a key, or the new `MESSAGE_KEY_*` symbol comes back
+   undeclared.
+6. Check the buffer arithmetic in `docs/protocol.md` still holds. An oversized
+   AppMessage is not truncated — it fails to transmit entirely.
 
 ## Conventions
 
-- **Match the surrounding code.** Follow the existing style, naming, and comment
-  density in each component (`watchface/src/c/proto.c` is the reference for C).
-- **Don't commit build output.** `watchface/build/`, `*.pbw`, and Android/Gradle
-  artifacts are gitignored and regenerable — keep them out of commits.
-- **Keep commits scoped to one component** where possible; protocol changes are
-  the deliberate exception.
+- **Keep policy on the phone and rendering on the watch.** Send a state enum, a count
+  or a timestamp; never a colour, a blink frame, or a formatted string. One of the
+  three target platforms is black-and-white, and only the watch knows which one it is.
+- **Prefer shape over colour for anything load-bearing.** Colour is a second channel
+  on two of three platforms, so it may reinforce a distinction but never carry it
+  alone.
+- **Match the surrounding code.** Follow the existing style, naming and comment
+  density in each component (`watchface/src/c/dial.c` is the reference for C).
+- **Comment the decisions, not the code.** Several things in here look like bugs and
+  are not — the hour index drawing last, an upcoming band being shallower rather than
+  lighter, the dial being a circle on a rectangular screen. Each has a note saying what
+  was tried and why it failed. Keep that up.
+- **Don't commit build output.** `watchface/build/`, `*.pbw` and Android/Gradle
+  artifacts are gitignored and regenerable.
+- **Keep commits scoped to one component** where possible; protocol changes are the
+  deliberate exception.

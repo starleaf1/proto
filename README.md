@@ -3,86 +3,93 @@
 A Pebble watchface and its phone-side companion, developed together in one
 repository.
 
-The watchface shows the time, date, battery, an **unread-message envelope**, and a
-**phone-call** indicator that is faded when idle, green during a call, flashing
-while ringing, and red for a missed call. Pebble exposes no on-watch API for a
-phone's notifications or call state, so those are pushed to the watch by a
-companion app over Bluetooth. The companion is a native **Android** app that reads
-the notification shade — this repo houses both sides.
+The watchface turns a twelve-hour dial into a **six-hour timeline**. Appointments in
+the next six hours are arcs spanning their duration, at their real clock position;
+tasks and reminders are triangles at the notch they fall nearest. Two single-line slots
+sit inside the ring — the top one alerts, the bottom one counts down to whatever is
+next. An idle face is a dial, the minute, and the date: nothing appears unless it has
+something to say.
 
-Because both icons are phone-fed, they are shown only while the companion link
-is up; when it drops, the whole icon row is hidden and the battery gauge is the
-only indicator left on screen.
+Pebble has no on-watch access to a phone's calendar, so the entries are pushed over
+Bluetooth by a native **Android** companion. This repo houses both sides.
 
 ## Repository layout
 
-| Path          | What it is                                                                 |
-| ------------- | -------------------------------------------------------------------------- |
-| `watchface/`  | The Pebble watchapp — C, built with the Pebble SDK.                        |
-| `pipe/`       | The Android companion — reads notifications, sends `UnreadCount`, `MissedCount`, `PhoneState`, `Heartbeat`. |
-| `docs/`       | [Architecture](docs/architecture.md) and the [protocol contract](docs/protocol.md). |
-| `CONTRIBUTING.md` | Dev environment setup and conventions.                                 |
+| Path | What it is |
+| --- | --- |
+| `watchface/` | Pebble watchapp (C, Pebble SDK). See `watchface/CLAUDE.md`. |
+| `pipe/` | Android companion (Kotlin, calendar reader). See `pipe/CLAUDE.md`. |
+| `docs/` | Architecture and the watch↔phone protocol contract. |
 
-## How the two sides talk
+## Target hardware
 
-Everything the watch and phone exchange rides on four Pebble AppMessage keys:
+The 2026 devices only:
 
-| Field        | Value                                    |
-| ------------ | ---------------------------------------- |
-| App UUID     | `f2fc68a6-9636-4694-929b-73c11c33f0e4`   |
-| Message keys | `UnreadCount` (`10000`), `MissedCount` (`10001`), `PhoneState` (`10002`), `Heartbeat` (`10003`) — `int32` |
-| Direction    | phone → watch                            |
-| Behaviour    | `UnreadCount > 0` lights the envelope; `PhoneState` selects the phone icon's colour — `0` idle, `1` in a call, `2` ringing, `3` missed; `Heartbeat` keeps the pair on screen |
+| Platform | Device | Display |
+| --- | --- | --- |
+| `flint` | Pebble 2 Duo | 144×168, **black and white** |
+| `emery` | Pebble Time 2 | 200×228, colour |
+| `gabbro` | Pebble Round 2 | 260×260, colour, round |
 
-The phone sends *meaning*, never colour: three of the seven target platforms are
-black-and-white, and only the watch knows which one it is. Flashing is likewise
-watch-side — the phone says "ringing" once, and the watch runs the animation.
+One of the three has a single ink, which is why the phone sends *meaning* and never
+colour: the companion cannot know which watch is on the other end. Every distinction on
+the face — running versus upcoming, overdue versus due, one entry versus several — is
+carried by shape or depth first, with colour layered on top only where there is any.
 
-Both icons vanish entirely — not faded — if the watch loses confidence in them,
-whether Bluetooth dropped (the watch notices by itself) or the companion stopped
-checking in (`Heartbeat`). The battery gauge stays, being the one thing the watch
-works out for itself.
+## The integration surface
 
-That's the whole integration surface. Full details — buffer arithmetic, delivery
-semantics, and the PebbleKit Android call — are in
-[docs/protocol.md](docs/protocol.md).
+| | |
+| --- | --- |
+| App UUID | `f2fc68a6-9636-4694-929b-73c11c33f0e4` |
+| Message keys | `Heartbeat` (`10000`), `CalEvents` (`10001`), `CalFlags` (`10002`), `NavManeuver` (`10003`), `NavDistance` (`10004`), `NavUnit` (`10005`), `PhoneBattery` (`10006`) |
+| Direction | phone → watch, always |
 
-## Quick start
+Calendar entries arrive as a packed byte array: an id, an absolute start time, a
+duration and two enum bytes each. **No titles, locations or attendees** — the watch
+draws a position and a duration, and nothing else about an entry leaves the phone.
 
-### Watchface (Pebble)
+Read `docs/protocol.md` before changing any of it. Both sides move in the same commit.
+
+## Quick start — watchface
 
 Requires the [Pebble SDK](https://developer.repebble.com). Run all commands from
-`watchface/`:
+`watchface/`.
 
 ```sh
 cd watchface
-pebble build                          # build for all target platforms
-pebble install --emulator emery       # run in the emery emulator
+pebble build                          # all three target platforms
+pebble install --emulator flint       # or emery, or gabbro
 pebble install --phone <ip>           # install to a paired phone
 ```
 
-See [watchface/CLAUDE.md](watchface/CLAUDE.md) for the full command reference
-(emulator control, screenshots, headless/VNC usage).
+To put something on the dial without the companion, send the demo calendar — a
+synthetic set of entries covering every marker case:
 
-### Android companion
+```sh
+watchface/tools/send-demo-events.py --emulator flint
+```
 
-The module lives under `pipe/` (Gradle project `ProtoPipe`, namespace
-`link.dendritik.proto.pipe`):
+See `watchface/CLAUDE.md` for the full command reference — emulator control,
+screenshots, headless/VNC usage, and the gotchas specific to this environment.
+
+## Quick start — Android companion
+
+Gradle project `ProtoPipe`, namespace `link.dendritik.proto.pipe`.
 
 ```sh
 cd pipe
 ./gradlew assembleDebug            # requires JDK 21 and the Android SDK
-./gradlew installDebug             # install to a connected device
+./gradlew installDebug
+./gradlew test                     # the wire format, on the bare JVM
 ```
 
-On first launch, grant it **notification access** from the app's home screen —
-without that the shade is invisible to it and both icons stay faded. The app then
-runs entirely in the background as a `NotificationListenerService`. See
-[pipe/README.md](pipe/README.md) for the routing rules and how to change them.
+On first launch, grant **calendar access** and **notifications**. The second is for
+the companion's own ongoing notification: it runs as a foreground service, because
+nothing else keeps the process alive long enough to watch a calendar.
 
 ## Documentation
 
-- [docs/architecture.md](docs/architecture.md) — components and data flow
-- [docs/protocol.md](docs/protocol.md) — the AppMessage contract in full
-- [CONTRIBUTING.md](CONTRIBUTING.md) — how to set up and contribute
+- `docs/architecture.md` — how the pieces fit and how data flows
+- `docs/protocol.md` — the complete wire contract
+- `CONTRIBUTING.md` — dev setup and conventions
 - Pebble SDK reference — <https://developer.repebble.com>

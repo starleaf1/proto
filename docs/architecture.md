@@ -3,132 +3,165 @@
 `proto` is two programs that cooperate over Bluetooth:
 
 ```
-┌──────────────────────────┐              AppMessage              ┌─────────────────────────┐
-│  Phone companion         │  UnreadCount, MissedCount,           │  Pebble watchface       │
-│  (pipe/ — Android;       │  PhoneState, Heartbeat               │  (watchface/)           │
-│   reads notifications)   │  (int32, phone → watch)              │  draws the envelope     │
-│                          │  ────────────────────────────────►   │  and phone icons        │
-│                          │   on change, plus a liveness beat    │                         │
-└──────────────────────────┘                                      └─────────────────────────┘
+┌────────────────────────────┐            AppMessage             ┌──────────────────────────┐
+│  Phone companion           │  Heartbeat, CalEvents, CalFlags,  │  Pebble watchface        │
+│  (pipe/ — Android)         │  NavManeuver/Distance/Unit,       │  (watchface/)            │
+│  reads the calendar and    │  PhoneBattery                     │  draws a six-hour        │
+│  the phone's battery       │  (phone → watch)                  │  timeline on the dial,   │
+│                            │  ───────────────────────────────► │  plus two single-line    │
+│                            │   on change, plus a liveness beat │  slots inside it         │
+└────────────────────────────┘                                   └──────────────────────────┘
 ```
 
 The dividing line: **the phone decides meaning, the watch decides pixels.** The
-companion resolves which apps matter, what a notification channel means, and
-whether a call is ringing or in progress. The watch turns that into a colour — or,
-on the three black-and-white platforms, into ink density. No colour crosses the
-wire, because the companion cannot know which watch model is on the other end.
+companion resolves which entries exist, when they start, how long they run, and
+whether one is an appointment or a reminder. The watch turns that into arcs,
+triangles and colours. No colour crosses the wire, because the companion cannot know
+which watch model is on the other end — and one of the three is black-and-white.
+
+## What the face answers
+
+Not "how many things are waiting for me" — that was the previous design, and it needed
+a notification listener to count things. This one answers **"what are my next few
+hours, and is anything wrong right now"**.
+
+- **The dial is a twelve-hour clock face used as a timeline.** Appointments in the
+  next six hours are arcs spanning their duration, at their real clock position.
+  Tasks and reminders are triangles at the notch they fall nearest.
+- **The top slot alerts**, one thing at a time, highest priority only.
+- **The bottom slot counts down** to whatever is next, or up through whatever is
+  running.
+- **Nothing else is drawn.** An idle face is a dial, the minute, and the date.
+
+## Certainty, restated
+
+The previous design expressed a loss of certainty by *hiding* its phone-fed icons: it
+had counts, a count cannot be checked, and a stale one is a silent lie.
+
+Calendar entries are not counts. An entry is timestamped, so it ages out on its own,
+and a marker that is six hours old has already left the window. That changes the right
+answer: **uncertainty becomes something the face states rather than something it
+silently omits.** "Companion disconnected" is the top slot's first priority, and the
+calendar keeps drawing underneath it.
+
+The watch still owns three things outright — the time, the date and its own battery —
+and those are never gated on anything.
 
 ## Components
 
 ### `watchface/` — the Pebble watchapp
 
-Single-window C app. A root layer's update proc paints everything each time the
-watch state changes:
+One window, one layer, one update proc, split across seven small modules.
 
-- **Time** — hours in Orbitron 54, rendered from a minute tick handler.
-- **Date** — Rajdhani Light 22.
-- **Status icons** — an **unread-message envelope** and a **phone-call handset**,
-  drawn as a centered pair. Two gates gate the pair, and while either is shut neither
-  icon is drawn at all: both are phone-fed, so the watch has no current value for
-  either. The first gate is the connection service — Bluetooth loss, which the watch
-  detects itself. The second is a liveness watchdog fed by the companion's
-  `Heartbeat`, which catches the case Bluetooth cannot: a companion that has crashed
-  or lost notification access while the link stays perfectly healthy. Hidden rather
-  than faded, because faded already means *idle* and idle is a claim the watch can no
-  longer make. The handset has four states: faded when idle, green
-  during a call, flashing green/amber while ringing, red for a missed call. On the
-  three black-and-white platforms there is no hue to spend, so **rate** carries the
-  state instead — static-faded is idle, static-solid is a missed call, and the two
-  live states are told apart by flashing at 2 Hz (in a call) versus 4 Hz (ringing).
-  That flash is the only animation on the face. It runs on a local `app_timer` owned
-  solely by `flash_sync()`, which picks the rate from the state, re-arms when the
-  state changes mid-call, and stops on every static state, on link loss, while a
-  modal covers the face, and after a 120 s watchdog.
-- **Battery gauge** — from the battery state service, just above the numeral.
-  The one indicator the watch computes itself, so the one that is always shown.
+| File | Owns |
+| --- | --- |
+| `proto.c` | Lifecycle, the service handlers, and the paint order. |
+| `geometry.{c,h}` | The dial's trigonometry and the vertical layout. |
+| `theme.h` | The whole palette and the three font choices. |
+| `events.{c,h}` | The event table, the live window, the linger rules, and which entry the bottom slot should show. |
+| `dial.{c,h}` | Bands, notches, markers, the hour index. |
+| `slots.{c,h}` | Both slots, and every glyph. |
+| `wire.{c,h}` | The AppMessage inbox and the two watchdogs. |
+| `wbatt.{c,h}` | The watch's own hours-remaining estimate. |
 
-The envelope and the missed-call handset are the only elements the watch cannot
-compute on its own. Pebble provides no on-watch API for the phone's notification
-count or call history, so the watchface holds an `s_unread` counter and an
-`s_missed` counter — each starts at `0` (icon unlit) and is updated only when an
-AppMessage arrives carrying `UnreadCount` / `MissedCount`.
+**The dial** is one representation doing all the work: `uint8_t coverage[360]`, one
+byte per degree, holding the most prominent thing happening at that degree.
+Overlapping appointments flatten because they write the same array, and `max()` makes
+a merged band inherit the more urgent member's weight. Round and rectangular displays
+share one code path.
 
-Entry point and lifecycle live in [`watchface/src/c/proto.c`](../watchface/src/c/proto.c);
-the AppMessage inbox handler is `inbox_received()`.
+Prominence never depends on colour, because `flint` has none. A running appointment is
+drawn to about two thirds of the notch zone's depth, an upcoming one to a third — both
+stopping short of the notch inner-ends, so the ring reads as a dial carrying a marker
+rather than as a coloured arc with ticks on it. A grouped marker is a deeper spike. Colour, where there is any, is layered on top of distinctions that
+already work without it — and where it is doing the work, the shape it stands in for
+is freed up. Point markers are solid wedges on the colour platforms, amber against
+orange saying upcoming against overdue; on `flint` the upcoming one is hollow, because
+there the two are the same ink and fill is all that is left to separate them.
+
+The notch ring's place in that stack is the one thing that does differ by display.
+On `emery` and `gabbro` it is drawn last, ink over everything, so an unbroken grid
+runs across the bands and the markers both. `flint` has no hue to carry the band, so
+a running one fills the zone in the same ink as the notches; there they invert to
+background where a running band crosses them, and they stay underneath the markers so
+that cut never splits a marker in half.
+
+**The hour index** is why any of it is readable: absolute clock positions need a "now"
+to be measured against. It is drawn last, after everything, because both slots are
+centred — which puts them at twelve and six o'clock — and their background knockout
+would otherwise erase the one element everything else is relative to.
+
+**The dial hugs the screen** — a circle on `gabbro`, the rectangular perimeter on
+`flint` and `emery`. That means equal spans of time cover unequal arc lengths on the
+two rectangular platforms, because a corner is 1.5× further from the centre than an
+edge midpoint. The distortion is accepted; the angle, which is what actually encodes
+the time, is exact everywhere.
+
+What is *not* allowed to vary is how thick a marker looks. Every depth is a count of
+pixels measured perpendicular to the boundary — never a fraction of the distance to it,
+and on a rectangle not a fixed distance along the ray either, since a ray leaving near a
+corner meets the edge at up to 49° and a constant radial depth would present only two
+thirds of itself across that edge. `depth_along_ray` divides the depth by the cosine of
+that angle, so the ray distance stretches toward a corner and the band reads as a ribbon
+of one thickness all the way round.
 
 ### `pipe/` — the Android companion
 
-Kotlin + Jetpack Compose, `namespace link.dendritik.proto.pipe`. It reads the
-notification shade, decides what each notification means, and pushes the result to
-the watch with PebbleKit Android.
+Kotlin + Jetpack Compose, `namespace link.dendritik.proto.pipe`.
 
-The pipeline is four small pieces, arranged so that every decision is a pure
-function and only the edges touch Android:
+| Piece | Role |
+| --- | --- |
+| `PipeService` | Foreground service. The process keeper, and the owner of everything with a lifecycle. |
+| `CalendarSource` | Queries `CalendarContract.Instances` over the window the watch can draw. |
+| `CalendarWatcher` | `ContentObserver` plus `ACTION_PROVIDER_CHANGED`. |
+| `PhoneBattery` | `ACTION_BATTERY_CHANGED`, filtered to whole-percent changes. |
+| `EventBlob` / `EventDiff` | Pure. Packing and diffing, covered by JVM unit tests. |
+| `PebbleSender` | Debounce, coalesce, dedup, chunk, heartbeat. |
+| `BootReceiver` | Restarts the service after a reboot. |
 
-| Piece | File | Role |
-| ----- | ---- | ---- |
-| `ProtoNotificationListener` | `notify/ProtoNotificationListener.kt` | The `NotificationListenerService`. Flattens each `StatusBarNotification` into a `NotificationFacts`, and is the only class that touches framework types. |
-| `Classifier` | `notify/Classifier.kt` | Pure. `NotificationFacts` + config → `Verdict`: ignore, chat, or a call in some state. |
-| `ActiveSet` | `notify/ActiveSet.kt` | Holds the live verdict per notification key and folds them into one `IconState`. |
-| `PebbleSender` | `pebble/PebbleSender.kt` | Debounces, drops no-op sends, re-sends on watch reconnect, and beats a heartbeat through the silence. |
+Framework types stop at `CalendarSource`. Everything below it sees `EventFacts`, which
+is what lets the whole wire format be tested with no device and no Robolectric — the
+same property the previous design's `Classifier`/`ActiveSet` had, kept deliberately.
 
-`PipeConfig` (`config/PipeConfig.kt`) holds the routing rules — currently
-hard-coded defaults, shaped so a settings screen could persist them unchanged.
-Each rule maps an app's packages plus a set of **notification-channel patterns** to
-the envelope or the phone icon, with the notification's own `category` and a
-per-app fallback behind that. Channel ids are the primary signal because that is
-what distinguishes WhatsApp's *Calls* channel from its *Messages* channel.
-
-The PebbleKit JS stub ([`watchface/src/pkjs/index.js`](../watchface/src/pkjs/index.js))
-remains in place and still sends nothing; it is only the JS runtime the watchface
-requires, not a data source.
+**It needs a foreground service now, and did not before.** The previous design
+piggy-backed on a bound `NotificationListenerService`, which the system kept alive for
+its own reasons. With the shade no longer being read there is no such host, and
+calendar observation, the phone's battery and the liveness heartbeat all have to
+outlive the activity. That is the one place this redesign costs the user something: a
+permanent notification and four permissions that did not exist before.
 
 ## Data flow
 
-1. A notification is posted, updated, removed, or re-ranked. The listener rebuilds
-   the facts for it — or, on connect and on a ranking change, for the whole shade.
-2. `Classifier` drops it if the app is unconfigured, if it is a group summary, or
-   if the user silenced it. Two call states are exempt from the silence rule, since
-   for them the icon reports a state rather than raising an alert: a call **in
-   progress** (which every dialler posts on a deliberately silent channel) and a
-   **missed** call. A silenced *ring* is still dropped.
-3. `ActiveSet` folds every live verdict into `{ unreadCount, missedCount, phone }`.
-   The phone state is the most urgent live call — **ringing > ongoing > missed >
-   idle** — while `missedCount` still counts every missed call underneath it.
-   Because the set is rebuilt from live notifications rather than counted
-   incrementally, dismissing the last one returns the icon to faded on its own.
-4. `PebbleSender` coalesces a burst into one message and sends it only if it
-   differs from the last one delivered.
-5. The watchface's `inbox_received()` stores whichever values arrived, calls
-   `flash_sync()`, re-arms the liveness watchdog, and marks the root layer dirty.
-6. The next paint lights the envelope when `UnreadCount > 0` and colours the
-   handset from `PhoneState` — and draws neither while the phone link is down or
-   the companion has stopped checking in.
+1. Something happens: the calendar changed, the watch reconnected, or fifteen minutes
+   passed and the six-hour window slid forward. All three land on one method,
+   `PipeService.reconcile`.
+2. `CalendarSource` scans `[now − 2 h, now + 6 h]`, excluding whole-day entries — they
+   have no position on a twelve-hour dial — and anything cancelled. Duration comes
+   from `END - BEGIN`; a zero-length instance is a reminder.
+3. `EventDiff` compares the scan against what the companion believes the watch holds.
+   A reconnect skips the diff and sends a **flush** instead, because a watchface that
+   relaunched holds nothing.
+4. `EventBlob` packs the records, twenty-four per message, and `PebbleSender` sends
+   them with `FLUSH`/`MORE` framing and a `Heartbeat`.
+5. `wire.c` decodes, upserts and removes against a fixed 32-slot table, and marks the
+   layer dirty.
+6. The next paint recomputes the coverage array from scratch and draws it. Every
+   marker's position, prominence and existence is a function of `now`, so the minute
+   tick is also what advances the countdown and retires whatever has aged out.
 
-Steps 1–6 are the change path, and it is the only path that carries news. Running
-underneath it is a second, much slower loop whose only job is to prove the companion
-still exists: when nothing has changed for a full period, `PebbleSender` re-sends the
-current state unchanged, and if the watch misses 2.5 periods of that it blanks the
-icon row. The two loops are deliberately independent — the heartbeat rate has no
-bearing on how fast a real notification reaches the watch, which is governed by the
-`onNotificationPosted` callback and a 250 ms debounce. See
-[protocol.md](protocol.md#liveness) for the cadence and why it is what it is.
+Steps 1–6 are the change path. Running underneath it is a much slower loop whose only
+job is to prove the companion still exists; if the watch misses 2.5 declared periods
+of that, the top slot says so. The two loops are independent — the heartbeat rate has
+no bearing on how fast a real change arrives, which is governed by the
+`ContentObserver` and a 250 ms debounce.
 
-Notification **content** never leaves the phone. Titles and text are read only to
-spot answer/decline buttons on a call, and are never stored, logged, or transmitted;
-the watch receives three integers.
+**Calendar content never leaves the phone.** Titles, locations, attendees and
+descriptions are never read. The watch receives a position, a duration and two enum
+bytes per entry.
 
-The exact identifiers, buffer sizes, and delivery semantics are specified in
-[protocol.md](protocol.md). Because both sides share that one contract, a change
-to the key, the UUID, or the message shape must land in `watchface/` and
-`pipe/` together.
+## Build boundaries
 
-## Build & tooling boundaries
-
-- `watchface/` builds with the Pebble SDK (`waf` via the `pebble` CLI). Output
-  goes to `watchface/build/`, which is generated and gitignored.
-- `pipe/` builds with Gradle (`./gradlew assembleDebug`, JDK 21). Its artifacts
-  are gitignored both in-module and at the repo root.
-
-Each component is self-contained; there is no shared build step. The only thing
+`watchface/` builds with the Pebble SDK (`waf` via the `pebble` CLI); output goes to
+`watchface/build/`, which is generated and gitignored. `pipe/` builds with Gradle
+(`./gradlew assembleDebug`, JDK 21). Each component is self-contained; the only thing
 they share is the protocol.

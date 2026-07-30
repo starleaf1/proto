@@ -1,4 +1,3 @@
 <resources>
     <string name="app_name">ProtoPipe</string>
-    <string name="listener_label">ProtoPipe watch bridge</string>
 </resources>

@@ -1,310 +1,293 @@
 # Watch ↔ phone protocol
 
-This is the complete contract between the Pebble watchface (`watchface/`) and
-the phone companion (`pipe/`, or the PebbleKit JS stub today). Both sides
-must agree on every value here.
+The complete contract between the Pebble watchface (`watchface/`) and the Android
+companion (`pipe/`). Both sides must agree on every value here, and both change in
+the same commit.
 
 ## Identity
 
-| Property         | Value                                    | Source                          |
-| ---------------- | ---------------------------------------- | ------------------------------- |
-| App UUID         | `f2fc68a6-9636-4694-929b-73c11c33f0e4`   | `watchface/package.json`        |
-| SDK version      | `3`                                      | `watchface/package.json`        |
-| Transport        | Pebble AppMessage (Bluetooth)            | —                               |
+| Property | Value | Source |
+| --- | --- | --- |
+| App UUID | `f2fc68a6-9636-4694-929b-73c11c33f0e4` | `watchface/package.json` |
+| SDK version | `3` | `watchface/package.json` |
+| Transport | Pebble AppMessage (Bluetooth) | — |
+| Direction | phone → watch, always | — |
 
-The companion must address messages to this UUID. Change it in exactly one
-place (`package.json`) and rebuild; the value is embedded into the app binary.
+The companion must address messages to this UUID. Change it in exactly one place
+(`package.json`) and rebuild; the value is embedded into the app binary.
 
-## Messages
+The watch only ever **reads**. It never replies with app data; its outbox exists only
+for AppMessage's own ACK/NACK bookkeeping.
 
-Four keys, all sent **phone → watch**:
+## Message keys
 
-| Key           | Numeric ID | Type    | Range        | Meaning                                   |
-| ------------- | ---------- | ------- | ------------ | ----------------------------------------- |
-| `UnreadCount` | `10000`    | `int32` | `>= 0`       | Unread chat-message count. `0` = envelope faded; `> 0` = lit. |
-| `MissedCount` | `10001`    | `int32` | `>= 0`       | Missed-call count. Informational once `PhoneState` is in use — see below. |
-| `PhoneState`  | `10002`    | `int32` | `0`–`3`      | Phone-icon state. `0` idle, `1` call in progress, `2` ringing, `3` missed. Unknown values clamp to idle. |
-| `Heartbeat`   | `10003`    | `int32` | `15`–`3600`  | Seconds until the companion next expects to check in. Sent with **every** message; see [Liveness](#liveness). Out-of-range values clamp. |
+Seven keys. Ids are positional from `10000` in the order the names appear under
+`messageKeys` in `watchface/package.json`.
 
-`PhoneState` is what colours the phone icon:
+| Key | Id | Type | Meaning |
+| --- | --- | --- | --- |
+| `Heartbeat` | `10000` | `int32` | Seconds until the companion next expects to check in. Sent with **every** message. Range `15`–`3600`; out-of-range values clamp. |
+| `CalEvents` | `10001` | `bytes` | Packed calendar records — see below. |
+| `CalFlags` | `10002` | `int32` | Bit 0 `FLUSH`, bit 1 `MORE`. |
+| `NavManeuver` | `10003` | `int32` | Turn shape, `0`–`10`. `0` clears navigation. Unknown values clamp to `0`. |
+| `NavDistance` | `10004` | `int32` | Distance to the turn, in **tenths** of `NavUnit`. |
+| `NavUnit` | `10005` | `int32` | `0` m, `1` km, `2` ft, `3` mi. |
+| `PhoneBattery` | `10006` | `int32` | Charge percentage `0`–`100`, or `-1` for unknown. |
 
-| Value | Name      | Colour platforms                | Black-and-white platforms   |
-| ----- | --------- | ------------------------------- | --------------------------- |
-| `0`   | `IDLE`    | Faded ghost                     | Faded ghost                 |
-| `1`   | `ONGOING` | Solid green, steady             | Flashing at **2 Hz**        |
-| `2`   | `RINGING` | Flashing green ↔ amber at 4 Hz | Flashing at **4 Hz**        |
-| `3`   | `MISSED`  | Solid red                       | Solid black, steady         |
+Three binding styles, one set of ids:
 
-Colour platforms have a hue per state, so only ringing needs to move. The
-black-and-white ones (aplite, diorite, flint) have no hue to spend, so **rate**
-carries the state instead: static-and-faded is idle, static-and-solid is a missed
-call, and the two live states are told apart by how fast they flash. This is the
-clearest illustration of why the wire carries meaning rather than pixels — the same
-`PhoneState` produces two entirely different rendering strategies.
-
-When several states are true at once the phone resolves them before sending, in
-this order: **`RINGING` > `ONGOING` > `MISSED` > `IDLE`**. A phone ringing right now
-outranks a call in progress, which outranks one already missed.
-
-The names are declared under `messageKeys` in `watchface/package.json`, in the
-order listed there. With `enableMultiJS`, the Pebble build assigns them
-sequential numeric ids starting at **10000** in that array order — `UnreadCount`
-→ **10000**, `MissedCount` → **10001**, `PhoneState` → **10002**, `Heartbeat` →
-**10003** (see `watchface/build/appinfo.json` → `messageKeys`, and
-`build/src/message_keys.auto.c`). **Append** any future key to
-the end of the array so existing ids don't shift. Both sides reference a key
-differently:
-
-- **Watch (C):** by symbol — `MESSAGE_KEY_UnreadCount`, `MESSAGE_KEY_MissedCount`,
-  `MESSAGE_KEY_PhoneState`, `MESSAGE_KEY_Heartbeat`.
-- **PebbleKit JS:** by name — `Pebble.sendAppMessage({ UnreadCount: n })`; the
-  JS runtime resolves each name to its id automatically.
-- **PebbleKit Android:** by **numeric id** — `10000` / `10001` / `10002` / `10003`. Android
-  does not see the names, so the integers must match. They live in one place,
-  [`protocol/Protocol.kt`](../pipe/app/src/main/java/link/dendritik/proto/pipe/protocol/Protocol.kt).
-  If keys are ever renumbered (inserting a key out of order can shift ids), update
-  the Android constants to match `appinfo.json`.
+- **Watch (C):** by symbol — `MESSAGE_KEY_Heartbeat`, `MESSAGE_KEY_CalEvents`, …
+- **PebbleKit Android:** by **numeric id**. Android never sees the names, so the
+  integers must match `watchface/build/appinfo.json`. They live in one place,
+  `pipe/.../protocol/Protocol.kt`.
+- **PebbleKit JS:** by name. The `src/pkjs/index.js` stub sends nothing — it exists
+  only because the build requires a JS entry point, and anything it sent would race
+  the Android companion for the same keys.
 
 > Adding a key requires `pebble clean` before `pebble build`. The generated
 > `message_keys.auto.h` is not regenerated on an incremental build, so the new
 > `MESSAGE_KEY_*` symbol comes back undeclared.
 
+**Append** new keys to the end of the array so existing ids do not shift.
+
+## `CalEvents` blob
+
+Little-endian throughout. A header, then N fixed-size records.
+
+```
+header   u8 version (= 1)   u8 count   u32 reserved (zero)
+record   u32 id   i32 startEpochS   u16 durMin   u8 kind   u8 op
+```
+
+6 header bytes, 12 bytes per record.
+
+| Field | Notes |
+| --- | --- |
+| `id` | Stable key for one **instance**. A weekly meeting is one event row and many instances; keying on the event id alone would make each occurrence overwrite the last. Must be stable across scans *and* across process restarts, since it is the identity the watch removes entries by. `CalendarSource` mixes `(eventId, startMinute)` with FNV-1a rather than using `hashCode`, whose contract does not promise stability between runs. |
+| `startEpochS` | **Absolute UTC seconds.** Pebble takes its clock from the phone, and absolute timestamps avoid a whole class of bug that "minutes from now" invites — a reference instant that has already moved by the time the watch decodes it. |
+| `durMin` | Minutes. **`0` means a point in time**: a task or reminder, which the watch draws as a triangle rather than a band. Clamped to `0`–`65535`, never wrapped. |
+| `kind` | `0` appointment, `1` task. Carried separately from `durMin` on purpose — see *Tasks* below. |
+| `op` | `0` upsert, `1` remove. |
+
+One blob rather than a message per entry: a first sync can be twenty entries, and
+twenty round trips over a transport with no retry contract is twenty chances to be
+dropped.
+
+### Sync semantics
+
+- **On connect**, and whenever the companion cannot know what the watch holds, it
+  sends a **flush**: `CalFlags` has `FLUSH` set on the first message, and the watch
+  drops its whole table before applying the records. This is the only path that
+  recovers from a watchface relaunch, because the watch persists no events.
+- **Otherwise** the companion sends only the difference — upserts for entries that
+  are new or changed, removes for entries that have left the scan — with
+  `CalFlags = 0`.
+- `MORE` is set on every message of a multi-message sync except the last.
+- An interrupted sync needs no recovery: the next `FLUSH` restarts it.
+- A flush carrying **zero** records is how the companion says the next six hours are
+  clear. It must still be sent; sending nothing would leave the watch showing what it
+  had.
+- Companion invariant: never interleave a delta into an in-flight flush.
+
+**Removal is one op regardless of cause.** An entry that was deleted, an appointment
+that was cancelled and a task that was completed all leave the scan the same way — by
+no longer appearing in it — and the watch renders no reason, so the wire carries none.
+
+### Tasks
+
+Android exposes no standard tasks provider, so the companion derives `kind` from the
+duration: a zero-length instance is a task or reminder. Two consequences worth
+knowing:
+
+- `CalendarContract` gives `STATUS_CANCELED`, which covers "appointment cancelled",
+  but has no notion of completion. **A task ticked off is not observable.** Its
+  marker ages out via the watch's two-hour linger instead of disappearing at once.
+- `kind` is on the wire independently of `durMin` precisely so a local provider that
+  *does* expose completion (OpenTasks / Tasks.org, `org.dmfs.tasks`) can be added
+  later as a companion-only change — no protocol change, no watchface change.
+
+Google Tasks cannot fill this gap: its on-device data is not reachable by third-party
+apps, and its REST API documents `due` as *"Only date information is recorded; the
+time portion of the timestamp is discarded"*, so every Google task arrives as a bare
+date — exactly the whole-day case the dial is specified to ignore.
+
+## Navigation
+
+The phone sends the maneuver's **shape**, not an arrow, and a number plus a unit, not
+a formatted string. The watch owns both, because it is the only side that knows
+whether the display it is drawing on has colour at all.
+
+| `NavManeuver` | |
+| --- | --- |
+| `0` | none — clears the slot |
+| `1` | straight |
+| `2` / `3` | left / right |
+| `4` / `5` | slight left / slight right |
+| `6` / `7` | sharp left / sharp right |
+| `8` | u-turn |
+| `9` | roundabout |
+| `10` | arrive |
+
+`NavDistance` is **tenths** of `NavUnit`. A watch face has room for about five
+characters, and `0.3 MI` needs the fraction while `250 M` does not; sending tenths
+lets the watch decide which to render. It shows the tenth below ten units and drops it
+above.
+
+The watch expires the nav slot on its own after **2 minutes** without an update,
+independently of the liveness watchdog below. A turn instruction is the one thing here
+that lies loudly when it goes stale — a phantom "right in 250 m" is worse than no
+instruction — and the general watchdog is far too slow to catch it.
+
+> Navigation is **stage 2**. The wire, the watch's rendering and the expiry timer are
+> all in place and drivable from the command line; the Google Maps notification parser
+> that would populate it is not written yet. See `pipe/CLAUDE.md`.
+
 ## Who decides what
 
-The split matters, because it is the reason no colour and no blink timing ever
-crosses this wire:
+**The phone owns policy.** Which calendars count, what a whole-day entry is, whether
+an entry is an appointment or a reminder, when something has been removed, what the
+phone's charge is, and which turn is next.
 
-- **The phone owns policy.** Which apps count, what a notification channel means,
-  whether a call is ringing or in progress, and when something has been dismissed.
-- **The watch owns rendering.** Which green, how a flash is timed, and what to do
-  on a display that has no colour at all — three of the seven target platforms
-  (aplite, diorite, flint) are black-and-white and substitute ink density for hue.
+**The watch owns rendering, and every threshold that is really a rendering decision.**
+Which blue, how deep a band sits in the notch zone, what a turn arrow looks like at
+twenty pixels, and when a battery counts as low. One of the three target platforms
+(`flint`) has a single ink; the companion cannot know which watch it is talking to, so
+it cannot know whether colour is even available. It sends *meaning*.
 
-A phone-supplied colour would break this: the companion cannot know which watch
-model it is talking to, so it cannot know whether colour is even available. It
-sends *meaning*; the watch renders it.
-
-**Flashing is watch-side.** The phone sends a state once, not a stream of blink
-frames. The watch runs the flash on a local timer — 125 ms per phase for ringing
-(4 Hz), 250 ms for a call in progress on black-and-white (2 Hz) — re-arms at the new
-rate when the state changes mid-call, and stops on any static state, on link loss,
-and while a modal covers the face. It gives up after 120 s so a companion that dies
-mid-call cannot drain the battery; the icon stays lit, it just stops moving.
-
-### `MissedCount` vs `PhoneState`
-
-Both exist, and the watch resolves the overlap with a one-way latch:
-
-- Once a companion has sent `PhoneState` **even once**, that key alone drives the
-  phone icon and `MissedCount` becomes informational.
-- A companion that never sends `PhoneState` keeps the original behaviour —
-  `MissedCount > 0` lights the icon red. This is what keeps
-  `pebble send-app-message --int 10001=1` working as a manual test.
-
-The latch is per app run and is not persisted, so it re-arms whenever the
-watchface relaunches.
+That is why `PhoneBattery` is a percentage and not a warning: a percentage is a fact,
+and the watch applies the ≤ 30% threshold itself.
 
 ## Liveness
 
-Both status icons are phone-fed, so the watch draws them only while it is sure of
-them. It hides the pair — **not faded, not drawn at all** — the moment it stops
-being sure. Faded is unavailable as a signal here because faded already means
-*idle*, and idle is a positive claim the watch can no longer make. The battery
-gauge is unaffected: it is the one indicator the watch computes itself.
+The watch's top slot has one job above all others: say so when it cannot vouch for
+anything phone-fed. Two independent failures, learned two different ways.
 
-There are two independent ways to lose certainty, and the watch learns them
-differently.
+- **Bluetooth loss — the watch detects it alone.** `connection_service_subscribe`
+  delivers it; no protocol involvement. While the link is down the companion should
+  say nothing at all, heartbeats included: there is nobody to hear them.
+  `PebbleSender` stands down on `INTENT_PEBBLE_DISCONNECTED` and re-syncs on
+  `INTENT_PEBBLE_CONNECTED`.
+- **Companion death — only a heartbeat reveals it.** A companion that has crashed,
+  been force-stopped or had its permissions revoked leaves Bluetooth perfectly
+  healthy. Its silence is byte-for-byte identical to silence from a companion with no
+  news.
 
-**Bluetooth loss — the watch detects it alone.** `connection_service_subscribe`
-delivers it; no protocol involvement, and nothing for the companion to do. While the
-link is down the companion should not send at all, heartbeats included: there is
-nobody to hear them. `PebbleSender` stands down on `INTENT_PEBBLE_DISCONNECTED` and
-resumes on `INTENT_PEBBLE_CONNECTED`.
+Five rules:
 
-**Companion death — only a heartbeat reveals it.** A companion that has crashed, been
-force-stopped, or had its notification access revoked leaves the Bluetooth link
-perfectly healthy. Silence from a dead companion is byte-for-byte identical to
-silence from a companion with no news, so the companion must speak on a schedule
-and the watch treats the absence of that as death.
-
-- **Any inbound message is proof of life.** The explicit `Heartbeat` exists only so a
-  companion with nothing to report can still speak. Ordinary traffic doubles as one.
+- **Any inbound message is proof of life.** The explicit `Heartbeat` key exists only
+  so a companion with nothing to report can still speak; ordinary traffic doubles as
+  one.
 - **The companion declares its own cadence.** `Heartbeat` carries *seconds until the
-  next check-in*, not a ping token, so the two sides never have to agree a constant
-  and the companion can change tier without a watchface update.
-- **The watch allows 2.5 periods** before giving up. One missed beat is ordinary on a
-  scheduler Android throttles; two in a row is a dead companion.
-- **Before the first heartbeat, the watch assumes life.** A watchface relaunch raises
-  no event the phone can see, so a watch that started blank would hide the row after
-  every excursion into another app. It starts on the slow cadence's grace
-  (`900 s × 2.5`), during which every count is zero anyway — visually identical to a
-  healthy idle companion.
+  next check-in*, not a ping token, so neither side hardcodes a constant and the
+  companion can change tier without a watchface update.
+- **The watch allows 2.5 periods** before raising the alert. One missed beat is
+  ordinary on a scheduler Android throttles; two in a row is a dead companion.
+- **Before the first heartbeat the watch assumes life.** A watchface relaunch raises
+  no event the phone can see, so starting with the alert up would flash
+  "companion down" after every excursion into another app. It starts on the slow
+  tier's grace (900 s × 2.5).
 - **A verdict does not survive a Bluetooth gap.** On reconnect the watch clears
-  "dead" and resets to the default grace, since the companion was never given a
-  chance to check in while the link was down.
+  "dead" and resets to the default grace — the companion was never given a chance to
+  check in, and a 30 s navigation cadence must not be inherited into a reconnect where
+  the companion is back on its slow tier.
 
 ### Cadence
 
-Two tiers, chosen by `PhoneState`, because staleness is not equally harmful in every
-state and Android is not equally willing to wake the companion in every state.
+| State | Period | Watch alerts after | Scheduler |
+| --- | --- | --- | --- |
+| Navigating | **30 s** | 75 s | `Handler.postDelayed` |
+| Everything else | **900 s** (15 min) | ~37 min | `AlarmManager.setAndAllowWhileIdle` |
 
-| State | Period | Watch blanks after | Scheduler |
-| ----- | ------ | ------------------ | --------- |
-| `ONGOING` / `RINGING` | **30 s** | 75 s | `Handler.postDelayed` |
-| everything else | **900 s** (15 min) | ~37 min | `AlarmManager.setAndAllowWhileIdle` |
+Navigation is the only state that earns the fast tier, and it is also the one state
+where the device is definitely interactive, so a plain handler post fires on time and
+costs nothing.
 
-A live call is the only state that lies loudly when it goes stale — a phantom ringing
-handset — and it is also the only state where the device is certainly interactive, so
-the fast tier is both the one that is needed and the one that can actually be
-delivered.
+Everything else has to ride the slow tier: in Doze the system throttles
+`setAndAllowWhileIdle` to roughly one alarm per 9–15 minutes per app, so a nominally
+faster cadence would not be delivered and the watch would raise a companion-down alert
+every night. 15 minutes is also the practical floor for any Android app without a
+foreground service — `setExactAndAllowWhileIdle` needs `SCHEDULE_EXACT_ALARM`, which
+Android 14 no longer grants by default, and `WorkManager`'s periodic minimum is 15
+minutes regardless.
 
-Everything else, **including a lit envelope**, rides the slow tier, and this is the
-part that is easy to get wrong. The tempting rule is "beat faster whenever an icon is
-lit", but a lit envelope on a phone dozing in a pocket is exactly the case that breaks
-it: in Doze the system throttles `setAndAllowWhileIdle` to roughly one alarm per 9–15
-minutes per app, so a nominally faster cadence is simply not delivered, and the watch
-would blank a perfectly correct envelope every night. A stale unread count is a far
-smaller lie than a row that flickers.
+Note what this does **not** affect: latency. A real change is pushed the moment it
+happens and reaches the watch within a 250 ms debounce.
 
-Note what this does *not* affect: **notification latency**. Real changes are pushed
-from `onNotificationPosted`, a system callback into a bound
-`NotificationListenerService` that Doze does not defer, and they reach the watch in
-`DEBOUNCE_MS`. The heartbeat is only the "nothing has changed and I am still here"
-signal. Raising its rate would not make a single notification arrive sooner.
+### What survives an outage
 
-15 min is also the practical floor for any companion without a foreground service:
-`setExactAndAllowWhileIdle` needs `SCHEDULE_EXACT_ALARM`, which Android 14 no longer
-grants by default and which Play reserves for genuine alarm-clock apps, and
-`WorkManager`'s periodic minimum is 15 min regardless. Going faster across the board
-means a foreground service and its permanent notification.
+The previous design hid its phone-fed icons whenever certainty was lost. This one does
+not, because calendar entries are not counts:
 
-## Watch-side behaviour (already implemented)
+- **Calendar markers and the countdown stay on screen.** An entry is timestamped and
+  ages out on its own, so it does not go stale the way a count does — and the top slot
+  is already saying the companion is unreachable, so nothing is claiming to be
+  complete.
+- **Navigation is dropped** on either failure. A stale turn is the one genuinely
+  dangerous lie.
+- **The phone's battery keeps its last value**, but the companion-down alert outranks
+  it, so it is not on screen anyway.
+- **The watch's own battery is unaffected.** It is the one thing the watch computes
+  itself.
 
-In [`watchface/src/c/proto.c`](../watchface/src/c/proto.c):
+## Buffers
 
-```c
-static void inbox_received(DictionaryIterator *iter, void *ctx) {
-  bool dirty = false;
-  Tuple *u = dict_find(iter, MESSAGE_KEY_UnreadCount);
-  if (u) { s_unread = u->value->int32; dirty = true; }   // drives the envelope
-  Tuple *m = dict_find(iter, MESSAGE_KEY_MissedCount);
-  if (m) { s_missed = m->value->int32; dirty = true; }   // a count; see PhoneState
-  Tuple *p = dict_find(iter, MESSAGE_KEY_PhoneState);
-  if (p) {                                 // authoritative once ever sent
-    int32_t v = p->value->int32;
-    s_phone = (v >= PHONE_IDLE && v <= PHONE_MISSED) ? (int)v : PHONE_IDLE;   // clamp
-    s_phone_seen = true;
-    dirty = true;
-  } else if (m && !s_phone_seen) {         // pre-PhoneState companion
-    s_phone = s_missed > 0 ? PHONE_MISSED : PHONE_IDLE;
-  }
-  Tuple *h = dict_find(iter, MESSAGE_KEY_Heartbeat);
-  if (h) s_hb_grace_ms = hb_grace_from(h->value->int32);   // companion declares its cadence
-  if (!s_companion) { s_companion = true; dirty = true; }  // arriving at all is the proof
-  hb_sync();                               // re-arm the watchdog
-  if (dirty) {
-    flash_sync();                          // one decision point for the timer
-    layer_mark_dirty(s_root_layer);
-  }
-}
-// ...
-app_message_register_inbox_received(inbox_received);
-app_message_open(64, 64);               // inbox / outbox buffers, in bytes
-```
+The watch opens `app_message_open(512, 64)`.
 
-Notes for the sender:
+A Pebble dictionary costs `1 + (n × 7) + payload` — a 1-byte header, then 7 bytes of
+tuple header per entry. The largest message is a full `CalEvents` sync: 24 records is
+`6 + 24 × 12 = 294` payload bytes, plus two `int32` keys, so `1 + 3×7 + 294 + 8 = 324`
+bytes. 512 leaves comfortable headroom, and `app_message_inbox_size_maximum()` is far
+above it.
 
-- **Inbox buffer is 64 bytes, and all four keys fit in 45 of them.** A Pebble
-  dictionary costs `1 + (n * 7) + payload` bytes — a 1-byte header, then 7 bytes of
-  tuple header (4-byte key, 1-byte type, 2-byte length) per entry. Four `int32`
-  keys are `1 + 4*7 + 4*4 = 45` bytes, leaving 19 bytes of headroom — room for
-  exactly **one** more `int32` key (56 bytes); a sixth would need
-  `app_message_open` raised. It does **not** need raising today.
-- An oversized message is not truncated — it fails to transmit entirely. Since
-  `APP_MESSAGE_INBOX_SIZE_MINIMUM` is 124, the 64-byte request always succeeds.
-- The watch only **reads** these keys; it never replies with app data. The
-  outbox exists only for AppMessage ACK/NACK bookkeeping.
-- Unknown keys are ignored — forward-compatible, but the watch acts only on
-  keys it knows.
+The 24-record cap lives in `EventBlob.MAX_RECORDS` and is deliberately well under the
+limit, because **an oversized AppMessage is not truncated — it fails to transmit
+entirely.**
 
-## Sending the value
+Unknown keys are ignored, so the watch is forward-compatible, but it acts only on keys
+it knows.
 
-### PebbleKit JS (current stub)
-
-```js
-// watchface/src/pkjs/index.js
-Pebble.sendAppMessage(
-  { UnreadCount: 3, MissedCount: 1 },
-  function ack()  { console.log('delivered'); },
-  function nack(e){ console.log('failed', e); }
-);
-```
-
-### PebbleKit Android (the companion)
-
-Implemented in
-[`pebble/PebbleSender.kt`](../pipe/app/src/main/java/link/dendritik/proto/pipe/pebble/PebbleSender.kt);
-the constants live in
-[`protocol/Protocol.kt`](../pipe/app/src/main/java/link/dendritik/proto/pipe/protocol/Protocol.kt).
-
-```kotlin
-val APP_UUID: UUID = UUID.fromString("f2fc68a6-9636-4694-929b-73c11c33f0e4")
-const val KEY_UNREAD_COUNT = 10000
-const val KEY_MISSED_COUNT = 10001
-const val KEY_PHONE_STATE  = 10002
-const val KEY_HEARTBEAT    = 10003
-
-val dict = PebbleDictionary().apply {
-    addInt32(KEY_UNREAD_COUNT, unreadCount)
-    addInt32(KEY_MISSED_COUNT, missedCount)
-    addInt32(KEY_PHONE_STATE, phoneState)   // 0 idle, 1 ongoing, 2 ringing, 3 missed
-    addInt32(KEY_HEARTBEAT, periodSeconds)  // 30 during a call, 900 otherwise
-}
-PebbleKit.sendDataToPebble(applicationContext, APP_UUID, dict)
-```
-
-> PebbleKit 4.0.1 is a 2016 artifact. Its
-> `registerPebbleConnectedReceiver()` calls `registerReceiver` without an
-> exported flag, which is a `SecurityException` at `targetSdk` 34+ — register that
-> broadcast yourself with `Context.RECEIVER_EXPORTED`, as `PebbleSender.start()`
-> does. `sendDataToPebble` and `isWatchConnected` are unaffected.
-
-## Delivery semantics & conventions
+## Delivery rules
 
 - **Send on change, not on a timer** — with the heartbeat as the sole exception.
-  Push a new value only when it actually changes; redundant sends waste the
-  Bluetooth link and battery. When nothing has changed for a whole heartbeat period,
-  re-send the current state anyway (see [Liveness](#liveness)); the watch hides its
-  icons otherwise.
-- **Put `Heartbeat` in every message.** Then ordinary traffic resets the watch's
-  watchdog for free and the explicit heartbeat only fires during real silence. Send
-  the period for the state you are sending, so leaving a call re-declares the slow
-  cadence in the same message that ends it.
-- **Say nothing while Bluetooth is down.** The watch already knows, and hides the
-  row without being told. Stand down on `INTENT_PEBBLE_DISCONNECTED`.
-- **Send absolute values**, not deltas. The watch replaces its stored value outright.
-- **Clamp counts to `>= 0`** and `PhoneState` to `0`–`3`. The watch clamps
-  out-of-range `PhoneState` to idle, and lights an icon on `count > 0` — so a
-  negative count renders as faded, not lit.
-- **Coalesce.** Dismissing a stack of notifications emits one removal callback per
-  notification within milliseconds; debounce to the latest value rather than
-  sending each one.
-- **Re-send on reconnect.** The watch persists nothing — every value resets to `0`
-  when the watchface launches or the watch reboots. Treat a
-  `PEBBLE_CONNECTED` broadcast as "whatever I last sent is gone" and re-send even
-  if nothing changed.
-- **Send a terminal `PhoneState` when a call ends** (`0`, or `3` if it was missed).
-  Nothing on the watch will correct a phantom ring left by a *live* companion: the
-  120 s flash watchdog only stops the animation and leaves the icon lit, and the
-  liveness watchdog does not fire while heartbeats keep arriving. It clears only if
-  the companion goes silent too.
-- **No retry contract is defined yet.** AppMessage may NACK when the watch is
-  busy or disconnected; coalesce to the latest value and resend on the next
-  opportunity rather than queueing every change.
+- **Put `Heartbeat` in every message.**
+- **Say nothing while Bluetooth is down.**
+- **Send absolute values**, never deltas, for everything except the calendar — and
+  there, a diff is only ever sent against a table the companion knows it flushed.
+- **Flush on reconnect.** The watch persists nothing; every value resets when the
+  watchface launches or the watch reboots.
+- **Clamp** before sending: percentages to `0`–`100`, distances to `>= 0`, durations
+  to `0`–`65535`.
+- **Coalesce.** A burst of calendar edits collapses to one send after 250 ms.
+- **Bail on the first failed chunk** of a multi-message sync, and do not record it as
+  sent. The remaining chunks belong to a sync the watch will never see the start of;
+  the next change or heartbeat redoes the whole thing.
+- **Clear navigation explicitly** when a route ends (`NavManeuver = 0`). The watch's
+  2-minute expiry is a backstop, not the contract.
 
-## Changing the protocol
+## Versioning
 
-Any change to the UUID, the key name/id, the value type, or the buffer sizes is
-a breaking change that must be made on **both** sides in the same change set.
-Adding a new key is backward-compatible for the watch (unknown keys are ignored)
-but still requires the watch to be updated before the key does anything.
+Any change to the UUID, a key's name, id or type, the blob layout, or the buffer sizes
+is a breaking change, and must be made on **both** sides in the same change set. There
+is no version negotiation; the blob's `version` byte exists so the watch can ignore a
+companion it does not understand rather than misread it.
+
+## Driving it by hand
+
+Every key is drivable from the command line. The `int32` ones go directly through
+`pebble send-app-message`; the `CalEvents` blob is packed by
+`watchface/tools/send-demo-events.py`, which is also the reference for the layout above
+in a language you can read a hexdump in.
+
+```sh
+# the demo calendar: a flush, then eight records covering every marker case
+watchface/tools/send-demo-events.py --emulator flint
+
+# turn right in 250 m, on the fast heartbeat tier
+pebble send-app-message --emulator flint --vnc --int 10003=3 10004=2500 10005=0 10000=30
+
+# phone battery at 28% (the watch's threshold is 30)
+pebble send-app-message --emulator flint --vnc --int 10006=28 10000=900
+
+# declare a 15 s cadence, then stay quiet: the companion-down alert appears in ~38 s
+pebble send-app-message --emulator flint --vnc --int 10000=15
+```

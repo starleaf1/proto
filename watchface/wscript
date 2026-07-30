@@ -26,6 +26,14 @@ def configure(ctx):
 def build(ctx):
     ctx.load('pebble_sdk')
 
+    # `pebble send-app-message` can only send integers, so the packed CalEvents
+    # blob cannot be driven from the command line. `PROTO_DEMO=1 pebble build`
+    # compiles in a synthetic event set instead, which is the only practical way
+    # to screenshot the dial. Never ship a build with it set.
+    if os.environ.get('PROTO_DEMO'):
+        for platform in ctx.env.TARGET_PLATFORMS:
+            ctx.all_envs[platform].append_value('DEFINES', 'PROTO_DEMO')
+
     build_worker = os.path.exists('worker_src')
     binaries = []
 
