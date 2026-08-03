@@ -58,9 +58,20 @@ unpacker could share the same mistake as the packer and both would agree.
 
 ## Things that look like bugs and are not
 
-- **The heartbeat receiver is registered at runtime, not in the manifest.** A manifest
+- **The tick receiver is registered at runtime, not in the manifest.** A manifest
   receiver would let the system restart a dead process just to announce that it is alive
   — which is the one thing a liveness heartbeat must never be able to claim.
+- **There is one periodic alarm, not two, and the heartbeat does not own it.** The tick
+  re-scans the window and only sends a bare heartbeat when that scan had nothing to say,
+  because every message already carries `Heartbeat` and any arrival is proof of life. A
+  separate beat alarm at the same period is not redundancy but harm: Doze throttles
+  `setAndAllowWhileIdle` per *app*, so the two would queue behind one budget and make
+  each other late.
+- **`PebbleSender.beat()` suppresses itself for 60 s after any send, and 60 s is not an
+  arbitrary number.** It has to be far below the period. The tick cadence is fixed, so a
+  skipped beat moves the next message a whole period out; suppressing for the full 900 s
+  could leave 1800 s plus a Doze-slipped tick between messages, which crosses the watch's
+  2.5-period grace and raises the alert the suppression was meant to avoid.
 - **`ContextCompat.registerReceiver` everywhere, never PebbleKit's own helper.**
   PebbleKit 4.0.1 is a 2016 artifact; its `registerPebbleConnectedReceiver()` calls
   `registerReceiver` without an exported flag, which is a hard `SecurityException` at

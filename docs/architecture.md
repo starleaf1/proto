@@ -116,7 +116,7 @@ Kotlin + Jetpack Compose, `namespace link.dendritik.proto.pipe`.
 | `CalendarWatcher` | `ContentObserver` plus `ACTION_PROVIDER_CHANGED`. |
 | `PhoneBattery` | `ACTION_BATTERY_CHANGED`, filtered to whole-percent changes. |
 | `EventBlob` / `EventDiff` | Pure. Packing and diffing, covered by JVM unit tests. |
-| `PebbleSender` | Debounce, coalesce, dedup, chunk, heartbeat. |
+| `PebbleSender` | Debounce, coalesce, dedup, chunk, and the heartbeat the tick owes. |
 | `BootReceiver` | Restarts the service after a reboot. |
 
 Framework types stop at `CalendarSource`. Everything below it sees `EventFacts`, which
@@ -149,11 +149,17 @@ permanent notification and four permissions that did not exist before.
    marker's position, prominence and existence is a function of `now`, so the minute
    tick is also what advances the countdown and retires whatever has aged out.
 
-Steps 1–6 are the change path. Running underneath it is a much slower loop whose only
-job is to prove the companion still exists; if the watch misses 2.5 declared periods
-of that, the top slot says so. The two loops are independent — the heartbeat rate has
-no bearing on how fast a real change arrives, which is governed by the
-`ContentObserver` and a 250 ms debounce.
+Steps 1–6 are the change path, and how fast a change arrives is governed by the
+`ContentObserver`: the scan and the send happen synchronously off it, so a calendar edit
+reaches the watch in about as long as a `CalendarContract.Instances` query takes.
+
+Underneath that, one periodic tick does the two jobs that need a clock, and it is a
+single `setAndAllowWhileIdle` alarm because Doze throttles that call per app rather than
+per alarm — a second one at the same period would only make the first late. So the tick
+re-scans the slid window, sends the delta if there is one, and otherwise speaks a bare
+heartbeat. Proving liveness needs no separate loop, because **any message arriving is the
+proof**; the `Heartbeat` key exists so a companion with no news can still say something.
+If the watch hears nothing for 2.5 declared periods, the top slot says so.
 
 **Calendar content never leaves the phone.** Titles, locations, attendees and
 descriptions are never read. The watch receives a position, a duration and two enum

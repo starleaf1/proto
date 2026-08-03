@@ -22,6 +22,7 @@ import link.dendritik.proto.pipe.battery.PhoneBattery
 import link.dendritik.proto.pipe.calendar.CalendarSource
 import link.dendritik.proto.pipe.calendar.CalendarWatcher
 import link.dendritik.proto.pipe.pebble.PebbleSender
+import link.dendritik.proto.pipe.protocol.Protocol
 
 /**
  * The process keeper, and the owner of everything with a lifecycle.
@@ -37,6 +38,9 @@ import link.dendritik.proto.pipe.pebble.PebbleSender
  *  - the calendar changed (an edit here, or a sync landing from the server)
  *  - the watch reconnected, which forces a full flush rather than a diff
  *  - time passed, so the six-hour window slid; nothing "changed" but the answer did
+ *
+ * The third of those is also the liveness heartbeat, and there is exactly one alarm
+ * for both — see [tick].
  */
 class PipeService : Service() {
 
@@ -46,7 +50,7 @@ class PipeService : Service() {
     private lateinit var battery: PhoneBattery
 
     private val alarms by lazy { getSystemService(Context.ALARM_SERVICE) as AlarmManager }
-    private var rescanReceiver: BroadcastReceiver? = null
+    private var tickReceiver: BroadcastReceiver? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -63,7 +67,7 @@ class PipeService : Service() {
         sender.start()
         watcher.start()
         battery.start()
-        startRescanAlarm()
+        startTickAlarm()
 
         // A flush, not a diff: we have no idea what the watch is holding at this
         // point, and a watchface that relaunched while we were dead has nothing.
@@ -72,15 +76,15 @@ class PipeService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_RESCAN) reconcile(flush = false)
+        if (intent?.action == ACTION_TICK) tick()
         return START_STICKY
     }
 
     override fun onDestroy() {
         PipeStatus.running = false
-        stopRescanAlarm()
-        rescanReceiver?.let { runCatching { unregisterReceiver(it) } }
-        rescanReceiver = null
+        stopTickAlarm()
+        tickReceiver?.let { runCatching { unregisterReceiver(it) } }
+        tickReceiver = null
         battery.stop()
         watcher.stop()
         sender.stop()
@@ -91,12 +95,30 @@ class PipeService : Service() {
     // The one action
     // ---------------------------------------------------------------------------
 
-    private fun reconcile(flush: Boolean) {
+    /** Returns whether anything reached the watch. */
+    private fun reconcile(flush: Boolean): Boolean {
         val events = calendar.query(System.currentTimeMillis())
         PipeStatus.eventCount = events.size
         PipeStatus.calendarGranted = calendar.hasPermission()
         PipeStatus.watchConnected = sender.isWatchConnected()
-        sender.syncCalendar(events, flush)
+        return sender.syncCalendar(events, flush)
+    }
+
+    /**
+     * The periodic wake-up: one alarm doing both of the jobs that need one.
+     *
+     * Re-scanning is the obvious one — nothing signals "the window moved". Proving we
+     * are alive is the other, and a payload already proves it, because every message
+     * carries [link.dendritik.proto.pipe.protocol.Protocol.KEY_HEARTBEAT]. So the beat
+     * is only owed when the re-scan found nothing to say.
+     *
+     * These were two alarms at the same period, which was worse than merely redundant:
+     * Doze throttles `setAndAllowWhileIdle` per *app*, so the pair competed for one
+     * budget and made each other late — a heartbeat that could not keep the cadence it
+     * declared.
+     */
+    private fun tick() {
+        if (!reconcile(flush = false)) sender.beat()
     }
 
     // ---------------------------------------------------------------------------
@@ -135,44 +157,52 @@ class PipeService : Service() {
     }
 
     // ---------------------------------------------------------------------------
-    // Window re-scan
+    // The tick
     // ---------------------------------------------------------------------------
 
     /**
-     * Nothing signals "the window moved", so it is polled.
+     * The app's only `AlarmManager` wake-up.
      *
-     * Fifteen minutes matches the practical floor for a background wake-up anyway
-     * (see [link.dendritik.proto.pipe.protocol.Protocol.HEARTBEAT_IDLE_S]) and is well
-     * inside the resolution the dial can draw, which quantises to twelve minutes.
+     * Its period is the declared heartbeat cadence, because that is the tighter of the
+     * two constraints it serves; for the window it is generous, the dial quantising to
+     * twelve minutes. `setAndAllowWhileIdle` is the only scheduler that survives Doze
+     * without `SCHEDULE_EXACT_ALARM`, which Android 14 no longer grants by default and
+     * which Play reserves for actual alarm-clock apps. It must be a `_WAKEUP` alarm:
+     * the non-waking variant would sit until the device stirred for some other reason,
+     * which can be hours.
+     *
+     * The receiver is registered at runtime rather than in the manifest. A manifest
+     * receiver would let the system restart a dead process just to announce that it is
+     * alive — which is the one thing a liveness heartbeat must never be able to claim.
      */
-    private fun startRescanAlarm() {
-        if (rescanReceiver != null) return
+    private fun startTickAlarm() {
+        if (tickReceiver != null) return
         val rcv = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
-                reconcile(flush = false)
-                armRescan()   // one-shot, re-armed, so a missed wake-up cannot compound
+                tick()
+                armTick()   // one-shot, re-armed, so a missed wake-up cannot compound
             }
         }
         ContextCompat.registerReceiver(
-            this, rcv, IntentFilter(ACTION_RESCAN), ContextCompat.RECEIVER_NOT_EXPORTED,
+            this, rcv, IntentFilter(ACTION_TICK), ContextCompat.RECEIVER_NOT_EXPORTED,
         )
-        rescanReceiver = rcv
-        armRescan()
+        tickReceiver = rcv
+        armTick()
     }
 
-    private fun armRescan() {
+    private fun armTick() {
         alarms.setAndAllowWhileIdle(
             AlarmManager.ELAPSED_REALTIME_WAKEUP,
-            SystemClock.elapsedRealtime() + RESCAN_MS,
-            rescanIntent(),
+            SystemClock.elapsedRealtime() + TICK_MS,
+            tickIntent(),
         )
     }
 
-    private fun stopRescanAlarm() = alarms.cancel(rescanIntent())
+    private fun stopTickAlarm() = alarms.cancel(tickIntent())
 
-    private fun rescanIntent(): PendingIntent = PendingIntent.getBroadcast(
+    private fun tickIntent(): PendingIntent = PendingIntent.getBroadcast(
         this, 1,
-        Intent(ACTION_RESCAN).setPackage(packageName),
+        Intent(ACTION_TICK).setPackage(packageName),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
 
@@ -180,8 +210,8 @@ class PipeService : Service() {
         private const val TAG = "PipeService"
         private const val CHANNEL = "pipe"
         private const val NOTE_ID = 1
-        private const val RESCAN_MS = 15 * 60 * 1000L
-        const val ACTION_RESCAN = "link.dendritik.proto.pipe.RESCAN"
+        private const val TICK_MS = Protocol.HEARTBEAT_IDLE_S * 1000L
+        const val ACTION_TICK = "link.dendritik.proto.pipe.TICK"
 
         fun start(context: Context) {
             val intent = Intent(context, PipeService::class.java)

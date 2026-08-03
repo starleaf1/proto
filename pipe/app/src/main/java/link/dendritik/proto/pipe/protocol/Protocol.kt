@@ -44,6 +44,11 @@ object Protocol {
      * nominally faster cadence would not be delivered and the watch would raise a
      * companion-down alert every night. A calendar entry is timestamped and ages out
      * on its own, which is a far smaller lie than an alert that flickers.
+     *
+     * The slow tier has no scheduler of its own, because that throttle counts alarms
+     * per *app*: it is the period of the host's one periodic tick, which re-scans the
+     * window and sends a bare heartbeat only when the scan had nothing to say. See
+     * `link.dendritik.proto.pipe.PipeService.tick`.
      */
     const val HEARTBEAT_LIVE_S = 30
     const val HEARTBEAT_IDLE_S = 900

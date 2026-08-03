@@ -196,7 +196,7 @@ Five rules:
 | State | Period | Watch alerts after | Scheduler |
 | --- | --- | --- | --- |
 | Navigating | **30 s** | 75 s | `Handler.postDelayed` |
-| Everything else | **900 s** (15 min) | ~37 min | `AlarmManager.setAndAllowWhileIdle` |
+| Everything else | **900 s** (15 min) | ~37 min | the companion's one `setAndAllowWhileIdle` tick |
 
 Navigation is the only state that earns the fast tier, and it is also the one state
 where the device is definitely interactive, so a plain handler post fires on time and
@@ -210,8 +210,24 @@ foreground service — `setExactAndAllowWhileIdle` needs `SCHEDULE_EXACT_ALARM`,
 Android 14 no longer grants by default, and `WorkManager`'s periodic minimum is 15
 minutes regardless.
 
+**That throttle is per app, not per alarm, which is why the slow tier is not a
+scheduler of its own.** The companion already needs one periodic wake-up to re-scan the
+six-hour window, and a second alarm at the same period would not buy a second wake-up —
+it would queue behind the first for one budget and make both late, spending the 2.5-period
+grace on self-inflicted contention. So there is exactly one alarm: it re-scans, sends the
+delta if there is one, and speaks a bare heartbeat only if there was not. Since any
+arrival is proof of life, a tick that sent a delta has already beaten.
+
+A payload sent shortly *before* a tick also counts, so the beat is suppressed if
+anything went out in the last 60 s. That guard is deliberately far shorter than the
+period: the tick cadence is fixed, so a beat skipped at one tick moves the next message
+a full period out, and suppressing for 900 s could put 1800 s plus a Doze-slipped tick
+between messages — past the grace, raising the alert it was trying to avoid.
+
 Note what this does **not** affect: latency. A real change is pushed the moment it
-happens and reaches the watch within a 250 ms debounce.
+happens; the `ContentObserver` fires, the scan runs and the delta goes out
+synchronously. (The 250 ms debounce in `PebbleSender` applies to the nav and battery
+scalars, which arrive in bursts; calendar traffic does not go through it.)
 
 ### What survives an outage
 
@@ -248,8 +264,10 @@ it knows.
 
 ## Delivery rules
 
-- **Send on change, not on a timer** — with the heartbeat as the sole exception.
-- **Put `Heartbeat` in every message.**
+- **Send on change, not on a timer** — with the heartbeat as the sole exception, and it
+  rides the same periodic tick as the window re-scan rather than a timer of its own.
+- **Put `Heartbeat` in every message**, which is what makes ordinary traffic a life sign
+  and lets the tick stay silent when it has just sent a delta.
 - **Say nothing while Bluetooth is down.**
 - **Send absolute values**, never deltas, for everything except the calendar — and
   there, a diff is only ever sent against a table the companion knows it flushed.
@@ -257,7 +275,10 @@ it knows.
   watchface launches or the watch reboots.
 - **Clamp** before sending: percentages to `0`–`100`, distances to `>= 0`, durations
   to `0`–`65535`.
-- **Coalesce.** A burst of calendar edits collapses to one send after 250 ms.
+- **Coalesce the scalars.** A burst of nav or battery updates collapses to one send
+  after 250 ms. Calendar edits are not debounced — each change signal re-scans — but a
+  burst that nets out to no change sends nothing, because an empty diff is not
+  transmitted.
 - **Bail on the first failed chunk** of a multi-message sync, and do not record it as
   sent. The remaining chunks belong to a sync the watch will never see the start of;
   the next change or heartbeat redoes the whole thing.
