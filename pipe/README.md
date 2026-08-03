@@ -29,30 +29,42 @@ source file has been deleted.
 
 ## First run
 
-Grant two things from the app's home screen:
+From the app's home screen:
 
 - **Calendar access** — the app's only data source. Without it there is nothing to send
   and the dial stays empty.
-- **Notifications** — for the companion's *own* ongoing notification, not for reading
-  yours. It runs as a foreground service.
+- **Pair watch** — on Android 12 and later. Recommended: it removes the ongoing
+  notification. See below.
+- **Notifications** — only asked for if you have not paired. It is for the companion's
+  *own* ongoing notification, not for reading yours.
 
-## Why a foreground service
+## Why it needs a host — and why pairing is the better one
 
-Because nothing else keeps the process alive. The previous version of this app read the
-notification shade, and the system kept its `NotificationListenerService` bound for its
-own reasons — that binding was, incidentally, the whole process keeper. With the shade
-no longer read there is no such host, and three things need to outlive the activity:
-watching the calendar for changes, watching the battery, and the liveness heartbeat the
-watch uses to decide whether to trust anything on screen.
+Something has to keep the process alive. Watching the calendar for changes, watching the
+battery, and the heartbeat the watch uses to decide whether to trust what is on screen
+all have to outlive the activity.
 
-The cost is a permanent notification and four permissions the old version did not need.
-It is the one place this design asks more of the user than the last one.
+The previous version of this app read the notification shade, and the system kept its
+`NotificationListenerService` bound for its own reasons — that binding was, incidentally,
+the whole process keeper. With the shade no longer read, there is no such host.
+
+**Pairing gets one back.** Associating the watch through Android's own device-pairing
+dialog asks the system to bind `PipeCompanionService` for as long as the watch is nearby,
+which is exactly the arrangement that was lost — and it needs no notification, no
+Bluetooth permission of ours, and no battery-optimisation exemption. When the watch is
+out of range nothing runs, which is correct: the watch is the only consumer.
+
+**Without pairing there is a fallback**, and it is the foreground service with the
+permanent notification. That is what runs on Android 11 and earlier, or if you decline
+the pairing dialog. Everything works identically; it just costs you a notification.
+
+You can see which one is in use, and undo the pairing, from the app's status card.
 
 ## How it works
 
 ```
 calendar changed ─┐
-watch reconnected ─┼──► PipeService.reconcile ──► CalendarSource.query
+watch reconnected ─┼──► PipeEngine.reconcile ──► CalendarSource.query
 15 minutes passed ─┘                                      │
                                                           ▼
                                             EventDiff ──► EventBlob ──► PebbleSender
@@ -64,13 +76,16 @@ different.
 
 | Piece | Role |
 | --- | --- |
-| `PipeService` | Foreground service. Owns everything with a lifecycle. |
+| `PipeEngine` | Owns everything with a lifecycle. Indifferent to which host holds it. |
+| `PipeCompanionService` | Host, API 31+. Bound by the system while the paired watch is nearby. |
+| `PipeService` | Host, fallback. Foreground service, and the ongoing notification. |
+| `PipeHost` | `chooseHost`, plus the `CompanionDeviceManager` calls. |
 | `CalendarSource` | Queries `CalendarContract.Instances` over `[now − 2 h, now + 6 h]`. |
 | `CalendarWatcher` | `ContentObserver` for local edits, `ACTION_PROVIDER_CHANGED` for syncs landing from the server. |
 | `PhoneBattery` | `ACTION_BATTERY_CHANGED`, filtered to whole-percent changes. |
 | `EventBlob` / `EventDiff` | Pure. The wire format and the scan diff. |
 | `PebbleSender` | Debounce, coalesce, dedup, chunk, heartbeat. |
-| `BootReceiver` | Restarts the service after a reboot. |
+| `BootReceiver` | Re-establishes the host after a reboot or an app update. |
 
 Framework types stop at `CalendarSource`. Everything below it sees `EventFacts`, which
 is what lets the entire wire format be unit-tested on the bare JVM with no device and no

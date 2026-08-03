@@ -27,9 +27,12 @@ JDK 21 and the Android SDK are required. No JDK on your PATH? Android Studio shi
 
 ```
 link.dendritik.proto.pipe
-├── PipeService.kt          foreground service — the process keeper
-├── BootReceiver.kt         restarts it after a reboot
-├── MainActivity.kt         permission grants + diagnostics
+├── PipeEngine.kt           the work; host-agnostic
+├── PipeCompanionService.kt host: system-bound while the watch is near (API 31+)
+├── PipeService.kt          host: foreground service — the fallback, and the notification
+├── PipeHost.kt             chooseHost + the CompanionDeviceManager calls
+├── BootReceiver.kt         re-arms whichever host this device uses
+├── MainActivity.kt         permission grants, watch pairing + diagnostics
 ├── PipeStatus.kt           observable, diagnostics only
 ├── calendar/
 │   ├── CalendarSource.kt   ContentResolver over CalendarContract.Instances
@@ -61,6 +64,27 @@ unpacker could share the same mistake as the packer and both would agree.
 - **The tick receiver is registered at runtime, not in the manifest.** A manifest
   receiver would let the system restart a dead process just to announce that it is alive
   — which is the one thing a liveness heartbeat must never be able to claim.
+- **Two hosts, and `chooseHost` is the only thing that picks between them.** It is pure,
+  and unit-tested, because the wrong answer is invisible: choose the companion host where
+  the platform will not bind it and the app simply stops sending, with no notification
+  left to show that it has. `MainActivity.maybeStart` is the only place that enforces
+  mutual exclusion, and it does so by stopping the foreground service — which is the
+  moment the notification disappears.
+- **`PipeCompanionService` overrides the deprecated `String` callbacks, not the
+  `AssociationInfo` ones.** The `String` form is the only one that exists on API 31–32,
+  and on 33+ the platform forwards to it for any MAC-backed association, which a
+  `BluetoothDeviceFilter` association always is. The newer overloads would mean naming a
+  class absent from the two oldest releases the host supports, for nothing.
+- **`CompanionHost`, not `Companion`.** The obvious name is shadowed by the implicit
+  companion object of any class that has one.
+- **Starting the engine before PebbleKit has a channel is correct.** Bluetooth presence
+  usually beats the Pebble app's connection broadcast; `syncCalendar` no-ops while the
+  watch is not connected, and the `INTENT_PEBBLE_CONNECTED` that follows drives the full
+  flush. Do not add coordination for this.
+- **`PipeStatus.watchPresent` is diagnostics that earn their keep.** The companion host's
+  whole premise — that the platform binds us on presence — cannot be checked from a
+  desktop. If that row reads `no` with the watch on the wrist, the binding is not working
+  on that device.
 - **There is one periodic alarm, not two, and the heartbeat does not own it.** The tick
   re-scans the window and only sends a bare heartbeat when that scan had nothing to say,
   because every message already carries `Heartbeat` and any arrival is proof of life. A
@@ -113,7 +137,7 @@ When adding it:
 - A `NotificationListenerService`, its manifest entry with
   `BIND_NOTIFICATION_LISTENER_SERVICE`, and the notification-access grant flow in
   `MainActivity` (a special access, not a runtime permission).
-- `PipeService` forwards the facts; `PebbleSender.submitNav` already exists.
+- `PipeEngine` forwards the facts; `PebbleSender.submitNav` already exists.
 - Note that active navigation is what earns the fast 30 s heartbeat tier — currently
   nothing does, so the companion always runs on the 900 s tier.
 
@@ -122,9 +146,15 @@ When adding it:
 | Permission | Why |
 | --- | --- |
 | `READ_CALENDAR` | Runtime. The only data source. |
-| `POST_NOTIFICATIONS` | Runtime (API 33+). For the foreground service's own notification. |
-| `FOREGROUND_SERVICE` + `_DATA_SYNC` | The process keeper. |
-| `RECEIVE_BOOT_COMPLETED` | Nothing rebinds a foreground service after a reboot. |
+| `REQUEST_COMPANION_RUN_IN_BACKGROUND` | Normal. The preferred host. |
+| `REQUEST_OBSERVE_COMPANION_DEVICE_PRESENCE` | Normal. Lets us ask to be bound on presence. |
+| `REQUEST_COMPANION_START_FOREGROUND_SERVICES_FROM_BACKGROUND` | Normal. Escape hatch to the fallback host. |
+| `POST_NOTIFICATIONS` | Runtime (API 33+). Only requested when the *fallback* host will be used — the companion host posts nothing. |
+| `FOREGROUND_SERVICE` + `_DATA_SYNC` | The fallback host. |
+| `RECEIVE_BOOT_COMPLETED` | Nothing rebinds a foreground service after a reboot, and a presence-observation request does not reliably survive one either. |
+
+No Bluetooth permission, deliberately: the association dialog scans on the system's
+behalf. Add one only if a real device proves it necessary.
 
 The `<queries>` block is not optional: on Android 11+ PebbleKit cannot see the Pebble
 app — neither its broadcasts nor the content provider behind `isWatchConnected()` —

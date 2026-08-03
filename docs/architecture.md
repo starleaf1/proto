@@ -111,7 +111,10 @@ Kotlin + Jetpack Compose, `namespace link.dendritik.proto.pipe`.
 
 | Piece | Role |
 | --- | --- |
-| `PipeService` | Foreground service. The process keeper, and the owner of everything with a lifecycle. |
+| `PipeEngine` | Everything with a lifecycle, and no opinion about what keeps the process alive. |
+| `PipeCompanionService` | The host. Bound by the system while the associated watch is nearby. |
+| `PipeService` | The fallback host: a foreground service, and the notification that costs. |
+| `PipeHost` | `chooseHost`, and the `CompanionDeviceManager` calls around it. |
 | `CalendarSource` | Queries `CalendarContract.Instances` over the window the watch can draw. |
 | `CalendarWatcher` | `ContentObserver` plus `ACTION_PROVIDER_CHANGED`. |
 | `PhoneBattery` | `ACTION_BATTERY_CHANGED`, filtered to whole-percent changes. |
@@ -123,18 +126,40 @@ Framework types stop at `CalendarSource`. Everything below it sees `EventFacts`,
 is what lets the whole wire format be tested with no device and no Robolectric — the
 same property the previous design's `Classifier`/`ActiveSet` had, kept deliberately.
 
-**It needs a foreground service now, and did not before.** The previous design
-piggy-backed on a bound `NotificationListenerService`, which the system kept alive for
-its own reasons. With the shade no longer being read there is no such host, and
-calendar observation, the phone's battery and the liveness heartbeat all have to
-outlive the activity. That is the one place this redesign costs the user something: a
-permanent notification and four permissions that did not exist before.
+**It got its host back.** The previous design piggy-backed on a bound
+`NotificationListenerService`, which the system kept alive for its own reasons. With the
+shade no longer being read there was no such host, and calendar observation, the phone's
+battery and the periodic tick all have to outlive the activity — so the first version of
+this redesign paid for a process keeper with a permanent notification.
+
+`CompanionDeviceManager` is the same kind of arrangement, and the one Android actually
+built for this shape of app. The user associates their watch once, through a system
+dialog that does its own Bluetooth scanning, and from Android 12 the platform binds
+`PipeCompanionService` for as long as that watch is nearby. No notification, no
+Bluetooth permission of ours, no battery-optimisation exemption to ask for. When the
+watch is away nothing runs, which is not a compromise: the watch is the only consumer,
+`syncCalendar` already stands down when it cannot see one, and the protocol says a
+companion-down verdict does not survive a Bluetooth gap.
+
+**Two hosts, one engine.** `PipeEngine` owns the collaborators, the tick and the
+reconcile; it does not know which host is holding it. `PipeService` — the foreground
+service, notification and all — remains for Android 11 and earlier, and for anyone who
+declines the pairing dialog. Exactly one of the two runs, and `chooseHost(sdkInt,
+hasAssociation)` is the only thing that decides which. It is a pure function because the
+interesting question about this design — whether the platform's binding really is a
+dependable process keeper on a given release — is one only a night on a real device can
+answer, and raising its floor should be a one-line change.
+
+The tick is where the two hosts differ least and it matters most: while bound, the
+process is warm, so the alarm behaves exactly as it does under the foreground service.
+Going notification-free cost nothing on the wire — same keys, same declared cadence, the
+watchface untouched.
 
 ## Data flow
 
 1. Something happens: the calendar changed, the watch reconnected, or fifteen minutes
    passed and the six-hour window slid forward. All three land on one method,
-   `PipeService.reconcile`.
+   `PipeEngine.reconcile`.
 2. `CalendarSource` scans `[now − 2 h, now + 6 h]`, excluding whole-day entries — they
    have no position on a twelve-hour dial — and anything cancelled. Duration comes
    from `END - BEGIN`; a zero-length instance is a reminder.

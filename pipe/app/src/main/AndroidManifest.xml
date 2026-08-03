@@ -1,23 +1,38 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- The calendar is the app's only data source. Runtime-requested by
          MainActivity; CalendarSource re-checks before every query, because the grant
          can be revoked while the service is running. -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
 
-    <!-- PipeService is the app's process keeper. Nothing else holds it open now that
-         the notification shade is no longer read, and calendar observation, the
-         phone's battery level and the liveness heartbeat all have to outlive the
-         activity. DATA_SYNC is the type that fits: keeping a remote device's copy of
-         local data current. -->
+    <!-- Preferred host (API 31+). Associating the watch lets the system bind
+         PipeCompanionService for as long as it is nearby, which holds the process open
+         without a notification. All three are normal permissions: no prompt, no runtime
+         request. -->
+    <uses-permission android:name="android.permission.REQUEST_COMPANION_RUN_IN_BACKGROUND" />
+    <uses-permission android:name="android.permission.REQUEST_OBSERVE_COMPANION_DEVICE_PRESENCE" />
+    <uses-permission
+        android:name="android.permission.REQUEST_COMPANION_START_FOREGROUND_SERVICES_FROM_BACKGROUND" />
+
+    <!-- Fallback host, for API < 31 and for anyone who has not associated a watch.
+         Something must hold the process open: calendar observation, the phone's battery
+         level and the periodic tick all have to outlive the activity, and with the
+         notification shade no longer being read there is no bound system service to
+         piggy-back on. DATA_SYNC is the type that fits: keeping a remote device's copy
+         of local data current. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
-    <!-- For the foreground service's own ongoing notification (Android 13+). -->
+    <!-- For the foreground service's own ongoing notification (Android 13+). Only
+         requested when that service is the host — the companion host has no
+         notification to post. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- Nothing rebinds a foreground service after a reboot, so we restart it. -->
+    <!-- Nothing rebinds a foreground service after a reboot, so we restart it — and a
+         presence-observation request does not reliably survive a reboot or an app update
+         either, so we re-arm that too. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <!-- Package visibility (Android 11+). PebbleKit talks to the Pebble app by
@@ -50,7 +65,21 @@
             </intent-filter>
         </activity>
 
-        <!-- Not exported: started only by MainActivity and BootReceiver. -->
+        <!-- The preferred host. Exported and permission-guarded because the binder on
+             the other end is the system's, not ours: it binds this whenever an
+             associated watch is nearby. -->
+        <service
+            android:name=".PipeCompanionService"
+            android:exported="true"
+            android:permission="android.permission.BIND_COMPANION_DEVICE_SERVICE"
+            tools:targetApi="s">
+            <intent-filter>
+                <action android:name="android.companion.CompanionDeviceService" />
+            </intent-filter>
+        </service>
+
+        <!-- The fallback host. Not exported: started only by MainActivity and
+             BootReceiver. -->
         <service
             android:name=".PipeService"
             android:exported="false"
@@ -61,6 +90,7 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
     </application>
