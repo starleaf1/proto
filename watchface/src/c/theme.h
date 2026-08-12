@@ -35,28 +35,46 @@
 // necessarily crossing or above the pointer.
 #define COL_BAND        PBL_IF_COLOR_ELSE(GColorVividCerulean, GColorBlack)
 
-// The "now" pointer. Ink, not the accent, and deliberately so: the accent is the
-// band's colour, and a pointer drawn in it disappeared entirely whenever now fell
-// inside a running appointment — which is most of the time it matters.
-#define COL_INDEX       GColorBlack
+// "Now". Red where there is colour, and black on flint because that is all there is.
+//
+// It is a rule struck across the strip on the colour displays rather than a wedge beside
+// it, and that shape only works in a hue nothing else on the strip uses: it lies over a
+// band, over the notches and over a marker, so it has to be legible against cerulean,
+// black and amber at once. Red is the only entry here that is none of them.
+//
+// It was the accent first, and that failed for the reason the band is the accent: a
+// "now" mark in the band's own colour disappeared whenever now fell inside a running
+// appointment, which is most of the time it matters. Ink came next and is what flint
+// still uses. Note that red is spent twice on this face now — here and on the
+// companion-down alert — where it used to be reserved for the alert alone. The two are
+// never confusable in practice, being a line on the ruler and a glyph in the bottom row,
+// but the reservation is gone and this is where it went.
+#define COL_INDEX       PBL_IF_COLOR_ELSE(GColorRed, GColorBlack)
 
 // Point-in-time markers: amber until due, orange once overdue.
 #define COL_TASK_SOON   PBL_IF_COLOR_ELSE(GColorChromeYellow, GColorBlack)
 #define COL_TASK_LATE   PBL_IF_COLOR_ELSE(GColorOrange, GColorBlack)
 
-// The warnings row. Red is reserved for the companion being gone — the only state
-// on this face that should ever alarm you. GColorGreen/GColorYellow stay unused:
+// The warnings row. Red for the companion being gone — the only *state* on this face
+// that should ever alarm you; it is shared now with the "now" rule above, which is not a
+// state at all. GColorGreen/GColorYellow stay unused:
 // on white they measure 1.4:1 and 1.1:1, so a free-floating shape in either is
 // invisible. The darker Chrome/Orange pair is what unoutlined shapes get.
 #define COL_ALERT       PBL_IF_COLOR_ELSE(GColorRed, GColorBlack)
 #define COL_WARN        PBL_IF_COLOR_ELSE(GColorChromeYellow, GColorBlack)
 
-// Three sizes per platform rather than one set scaled by the SDK, because Pebble fonts
+// Four sizes per platform rather than one set scaled by the SDK, because Pebble fonts
 // are fixed-pixel resources.
 //
-// Three *roles*, not two, because five rows have to share the height beside the strip
-// and the conditional ones are what should give way. A smaller slot size also puts
-// them below the date in the visual hierarchy, which is where they belong.
+// Three *text* roles, not two, because five rows have to share the height beside the
+// strip and the conditional ones are what should give way. A smaller slot size also
+// puts them below the date in the visual hierarchy, which is where they belong.
+//
+// TICK_* is the fourth, and it is not a row: it is the strip's own hour labels, and it
+// is the smallest thing on the face by some way. It is deliberately a size nobody would
+// read a *word* in — a graduation label is read as a number in a lane, not as prose, and
+// its width is what the strip's label lane is sized from, so every pixel of it is paid
+// for out of the content column. Its subset is digits only.
 //
 // Every size here came down when the clock became five glyphs instead of two.
 // Orbitron is a wide face — "00:00" measures 3.55 em, so a digit is five sixths of the
@@ -70,12 +88,15 @@
 #  define RES_NUM_FONT   RESOURCE_ID_NUM_28
 #  define RES_DATE_FONT  RESOURCE_ID_DATE_20
 #  define RES_SLOT_FONT  RESOURCE_ID_SLOT_16
+#  define RES_TICK_FONT  RESOURCE_ID_TICK_10
 #elif defined(PBL_PLATFORM_EMERY)
 #  define RES_NUM_FONT   RESOURCE_ID_NUM_40
 #  define RES_DATE_FONT  RESOURCE_ID_DATE_28
 #  define RES_SLOT_FONT  RESOURCE_ID_SLOT_22
+#  define RES_TICK_FONT  RESOURCE_ID_TICK_14
 #else   // gabbro
 #  define RES_NUM_FONT   RESOURCE_ID_NUM_36
 #  define RES_DATE_FONT  RESOURCE_ID_DATE_26
 #  define RES_SLOT_FONT  RESOURCE_ID_SLOT_22
+#  define RES_TICK_FONT  RESOURCE_ID_TICK_16
 #endif

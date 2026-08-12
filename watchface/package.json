@@ -60,6 +60,15 @@
         },
         {
           "type": "font",
+          "name": "TICK_10",
+          "file": "fonts/rajdhani_semibold.ttf",
+          "characterRegex": "[0-9]",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "font",
           "name": "NUM_40",
           "file": "fonts/orbitron.ttf",
           "characterRegex": "[0-9:]",
@@ -88,6 +97,15 @@
         },
         {
           "type": "font",
+          "name": "TICK_14",
+          "file": "fonts/rajdhani_semibold.ttf",
+          "characterRegex": "[0-9]",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "font",
           "name": "NUM_36",
           "file": "fonts/orbitron.ttf",
           "characterRegex": "[0-9:]",
@@ -100,6 +118,15 @@
           "name": "DATE_26",
           "file": "fonts/rajdhani_semibold.ttf",
           "characterRegex": "[A-Z0-9 ]",
+          "targetPlatforms": [
+            "gabbro"
+          ]
+        },
+        {
+          "type": "font",
+          "name": "TICK_16",
+          "file": "fonts/rajdhani_semibold.ttf",
+          "characterRegex": "[0-9]",
           "targetPlatforms": [
             "gabbro"
           ]

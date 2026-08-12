@@ -36,6 +36,7 @@ static Layer  *s_root_layer;
 static GFont   s_num_font;
 static GFont   s_date_font;
 static GFont   s_slot_font;
+static GFont   s_tick_font;              // the strip's hour labels
 static bool    s_custom_fonts = false;   // true if the TTFs loaded, so we unload
 
 static struct tm s_tm;
@@ -77,25 +78,25 @@ static void mark_dirty(void) {
 
 static void root_update_proc(Layer *layer, GContext *ctx) {
   GRect b = layer_get_bounds(layer);
-  Layout lo = layout_compute(b, s_num_font, s_date_font, s_slot_font);
+  Layout lo = layout_compute(b, s_num_font, s_date_font, s_slot_font, s_tick_font);
 
   graphics_context_set_antialiased(ctx, true);
   graphics_context_set_fill_color(ctx, COL_BG);
   graphics_fill_rect(ctx, b, 0, GCornerNone);
 
-  strip_draw(ctx, &lo, s_now);
+  strip_draw(ctx, &lo, s_now, s_tick_font);
 
   // Each row cuts its own footprint out of the strip before drawing, so a marker
   // that spikes this far inward stops at the text instead of crossing it.
   knock_out(ctx, text_plate(lo.num_box, s_num_font, s_time_buf));
   graphics_context_set_text_color(ctx, COL_ACCENT);
   graphics_draw_text(ctx, s_time_buf, s_num_font, lo.num_box,
-                     GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+                     GTextOverflowModeFill, ROW_ALIGN, NULL);
 
   knock_out(ctx, text_plate(lo.date_box, s_date_font, s_date_buf));
   graphics_context_set_text_color(ctx, COL_INK);
   graphics_draw_text(ctx, s_date_buf, s_date_font, lo.date_box,
-                     GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+                     GTextOverflowModeFill, ROW_ALIGN, NULL);
 
   slots_draw_count(ctx, &lo, s_slot_font, s_now);
   slots_draw_nav(ctx, &lo, s_slot_font);
@@ -173,12 +174,15 @@ static void init(void) {
   s_num_font = fonts_load_custom_font(resource_get_handle(RES_NUM_FONT));
   s_date_font = fonts_load_custom_font(resource_get_handle(RES_DATE_FONT));
   s_slot_font = fonts_load_custom_font(resource_get_handle(RES_SLOT_FONT));
-  if (s_num_font && s_date_font && s_slot_font) {
+  s_tick_font = fonts_load_custom_font(resource_get_handle(RES_TICK_FONT));
+  if (s_num_font && s_date_font && s_slot_font && s_tick_font) {
     s_custom_fonts = true;
   } else {
     s_num_font = fonts_get_system_font(FONT_KEY_LECO_42_NUMBERS);
     s_date_font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
     s_slot_font = fonts_get_system_font(FONT_KEY_GOTHIC_14);
+    // The only system font small enough to be an hour label rather than a row.
+    s_tick_font = fonts_get_system_font(FONT_KEY_GOTHIC_09);
   }
 
   s_now = time(NULL);
@@ -216,6 +220,7 @@ static void deinit(void) {
     fonts_unload_custom_font(s_num_font);
     fonts_unload_custom_font(s_date_font);
     fonts_unload_custom_font(s_slot_font);
+    fonts_unload_custom_font(s_tick_font);
   }
   window_destroy(s_window);
 }

@@ -268,9 +268,13 @@ static void draw_progress(GContext *ctx, GRect box, int pct, GColor ink) {
 // Row layout
 // ---------------------------------------------------------------------------
 
-// Places a glyph and its text as one centred group. The glyph is square and
-// most of the row's height, which lines its optical centre up with the text's
-// without having to know the font's internal padding.
+// Places a glyph and its text as one group, aligned the way every other row is —
+// against the strip on the rectangles, centred on gabbro. See ROW_ALIGN. The glyph
+// leads either way: it is what says which kind of row this is, so it belongs on the
+// edge the eye arrives at.
+//
+// The glyph is square and most of the row's height, which lines its optical centre up
+// with the text's without having to know the font's internal padding.
 static void slot_layout(GRect box, GFont font, const char *text,
                         GRect *glyph_box, GRect *text_box) {
   // 85% of the row's height, not all of it: the box carries the font's ascender
@@ -284,8 +288,8 @@ static void slot_layout(GRect box, GFont font, const char *text,
                                                GTextAlignmentLeft);
   }
   int16_t gap = ts.w > 0 ? side / 3 : 0;
-  int16_t total = side + gap + ts.w;
-  int16_t x = box.origin.x + (box.size.w - total) / 2;
+  int16_t x = box.origin.x
+            + PBL_IF_ROUND_ELSE((box.size.w - (side + gap + ts.w)) / 2, 0);
 
   *glyph_box = GRect(x, box.origin.y + (box.size.h - side) / 2, side, side);
   *text_box = GRect(x + side + gap, box.origin.y, ts.w + 4, box.size.h);

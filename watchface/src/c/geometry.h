@@ -26,14 +26,51 @@
 // Marker and pointer extents, as percentages of notch_len. They live here
 // rather than in strip.c because layout_compute() has to reserve the room they
 // claim before it can place a single text row.
+//
+// The pointer constants are flint's alone. Where there is colour, "now" is a red rule
+// struck across the strip instead of a wedge beside it — see strip_draw_now. A rule
+// cannot work on flint: it would be a black line across a ruler made of black lines,
+// which is an extra notch and nothing else. Colour is what makes the simpler shape
+// legible, so colour is where it is used.
+//
+// The wedge's base still sets `zone` on flint, and the hour labels cost that platform
+// nothing at all: their lane fits inside the free area the wedge already claimed, between
+// the notch zone and the wedge's own tip gap. What it costs instead is the label the
+// wedge lands on — see draw_hour_label.
 #define MARKER_DEPTH_PCT   150   // one point marker, reaching in from the track
 #define MARKER_GROUP_PCT   190   // a merged one: deeper, which is what says so
 #define POINTER_LEN_PCT    200
 #define POINTER_HALF_PCT   100   // half-extent along the track
 #define POINTER_TIP_GAP      3   // clearance from the notch zone's inner edge
 
+// The "now" rule's thickness, as a fraction of the radius. Thicker than an hour notch
+// on both colour displays, because it has to read as a different kind of thing from the
+// ruler it crosses — hue says that too, but hue is not a shape.
+#define RULE_W_DIV 18
+
+// Between the hour labels' lane and whatever sits outboard of it — the notch zone on
+// flint, the "now" rule's inner end on colour.
+//
+// Three, not one: on flint it is clearance from an hour notch, which is the *thicker*
+// kind, and from the halo a marker in the same lane carries.
+#define LABEL_GAP 3
+
 // Between the countdown's digits and the progress bar under them.
 #define PROGRESS_GAP 2
+
+// How the text rows sit in their boxes.
+//
+// Left on the rectangles: a column of rows sharing a left edge reads as one
+// block, and the edge is the strip's, which is what every row is beside.
+//
+// Centred on gabbro, because a circle will not have it. There the row boxes are
+// chords, and a chord's left edge moves 66 px between the clock's height and the
+// warnings row's — so a shared left edge is either a staircase or, if one x is
+// forced on all five, narrow enough at the clock's height to clip "00:00". What
+// the circle does give for free is a shared *centre*: `left` and `right` are
+// symmetric about center.x + zone/2 at every height, so centred rows already
+// line up into the column that left-aligning is trying to produce.
+#define ROW_ALIGN PBL_IF_ROUND_ELSE(GTextAlignmentCenter, GTextAlignmentLeft)
 
 // The face's fixed geometry, measured once per paint.
 //
@@ -48,7 +85,27 @@ typedef struct {
   int16_t radius;      // min(w, h) / 2 — the scale every other size derives from
   int16_t margin;
   int16_t notch_len;   // full notch; also the reference for every band depth
-  int16_t zone;        // what the strip claims inward from the track, in px
+  // Depths inward from the track, and the order of them is not the same on both kinds
+  // of display, because the "now" mark is not the same element.
+  //
+  // Colour:  notch zone | rule, over the markers | hour labels        | zone
+  // flint:   notch zone | hour labels, then the wedge over them both  | zone
+  //
+  // On colour the rule is only as deep as the strip's own elements, so the labels go
+  // past it and past the markers with it, and nothing is ever over or under a number.
+  // On flint they go *between* the ruler and the wedge — inside the free area the wedge
+  // already claimed, so they cost that platform no width whatever. What they share that
+  // area with they deal with two different ways: a marker they cover, having a plate and
+  // being drawn later, and the wedge covers them, being drawn last of everything, so the
+  // one label the wedge would land on is dropped instead.
+  int16_t label_x;
+  int16_t label_w;
+#ifdef PBL_COLOR
+  int16_t rule_len;    // the "now" rule: exactly the depth it has to strike through
+#else
+  int16_t ptr_tip;     // the wedge's apex, POINTER_TIP_GAP past the label lane
+#endif
+  int16_t zone;
   int16_t track_px;    // the track's length, for px <-> seconds conversions
 #ifdef PBL_ROUND
   int16_t arc_r;       // the circle the strip's arc is traced on
@@ -65,8 +122,10 @@ typedef struct {
   GRect   warn_box;    // pinned to the bottom
 } Layout;
 
+// tick_font is here for one number: the width of "00" in it is the label lane, and
+// the lane moves the track, which moves everything else.
 Layout layout_compute(GRect bounds, GFont num_font, GFont date_font,
-                      GFont slot_font);
+                      GFont slot_font, GFont tick_font);
 
 // A point on the track, and the ray angle there.
 //
@@ -125,7 +184,9 @@ GPoint step_in(GPoint p, int32_t a, int32_t d);
 // give the two base corners of a marker.
 GPoint step_side(GPoint p, int32_t a, int32_t d);
 
-// The tight, centred bounding box of one text row inside `box`, padded a little.
+// The tight bounding box of one text row's ink inside `box`, padded a little.
+// Follows ROW_ALIGN, because a plate that stayed centred while the text moved left
+// would knock out the wrong pixels and leave a marker crossing the digits.
 GRect text_plate(GRect box, GFont font, const char *text);
 
 // Fill `r` with the background colour. Invisible over the background itself, so

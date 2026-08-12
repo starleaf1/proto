@@ -2,11 +2,12 @@
 
 **proto** is a monorepo for a Pebble watchface and its phone-side companion. The
 watchface reads the left edge of the display as a four-hour timeline running downward —
-one hour behind, three ahead, and a pointer at the quarter mark that never moves.
+one hour behind, three ahead, and a "now" mark at the quarter mark that never moves.
 Appointments are bands spanning their duration, tasks and reminders are wedges poking
-inward off the ruler. A digital clock sits level with the pointer, and the date, a
-countdown, the next turn and whatever is running out stack beneath it. The calendar is
-pushed to the watch by an Android companion over Bluetooth.
+inward off the ruler, and the hour is numbered in a small lane just inside it. A digital
+clock sits level with the now mark, and the date, a countdown, the next turn and whatever
+is running out stack beneath it, left-aligned against the strip. The calendar is pushed
+to the watch by an Android companion over Bluetooth.
 
 ## Repository Layout
 
@@ -36,9 +37,14 @@ colour, round).
 That `flint` has a single ink is a design constraint, not a footnote. Every distinction
 on the face is carried by shape, depth or position first — a running band fills the notch
 zone while an upcoming one fills half of it, and an overdue marker is simply *above* the
-pointer — and colour is layered on top only where there is any. **Verify visual changes
+now mark — and colour is layered on top only where there is any. **Verify visual changes
 on `flint` as well as a colour platform**; something that reads well on `gabbro` can be
 invisible on `flint`.
+
+The now mark is the one place this goes the other way, and the only element on the face
+whose *shape* differs by display: where there is colour it is a red rule struck across
+the strip, and on `flint` it is a wedge beside it. A rule needs a hue nothing else on the
+strip uses, and a black one would be an extra notch on a ruler made of notches.
 
 ## The one contract that ties the components together
 
@@ -69,8 +75,8 @@ commit.
   did need one, and its absence is the shape paying for itself rather than a regression.
 - **Nothing animates, yet the strip scrolls.** There is one `MINUTE_UNIT` tick and no
   animation anywhere. Every position on the track is a function of `t - now`, so
-  recomputing the face once a minute slides the whole ruler past a pointer that is pinned
-  to a quarter of the way down.
+  recomputing the face once a minute slides the whole ruler — hour numbers and all — past
+  a now mark that is pinned to a quarter of the way down.
 - **The watch keeps drawing calendar markers when the companion is unreachable.** An
   entry is timestamped and ages out on its own, unlike the notification counts this face
   used to carry, and the bottom row is already saying the companion is gone. Uncertainty

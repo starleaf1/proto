@@ -187,9 +187,11 @@ There are **no image resources**. Every glyph — turn arrows, the phone silhoue
 battery, the marker triangles — is drawn from primitives or a normalised point table,
 so it stays crisp at three sizes and costs nothing from the resource budget.
 
-Fonts are per-platform, three sizes each (`NUM_*`, `DATE_*`, `SLOT_*`), selected in
-`theme.h` by `PBL_PLATFORM_*`. Pebble fonts are fixed-pixel resources, so one set
-scaled by the SDK is not an option. The `characterRegex` subsets are aggressive —
+Fonts are per-platform, four sizes each (`NUM_*`, `DATE_*`, `SLOT_*`, `TICK_*`), selected
+in `theme.h` by `PBL_PLATFORM_*`. Pebble fonts are fixed-pixel resources, so one set
+scaled by the SDK is not an option. `TICK_*` is not a row — it is the strip's hour
+numbers, digits only, and the measured width of `"00"` in it *is* the label lane, so
+changing that size moves the text column. The `characterRegex` subsets are aggressive —
 **adding a glyph to any string means editing the regex** in `package.json`.
 
 **The clock is the constraint on the whole layout, and it is a width constraint.**
@@ -282,22 +284,62 @@ code; this is the index.
   nothing to see. `flint` draws the band and the notches in the same ink, so there the
   notches invert under a running band and stay *below* the markers; a cut through a solid
   marker would split the one shape that says "overdue".
-- **The pointer sits inside the notch zone, not in it, and points the other way.** See
-  `strip_draw_now`. Its apex stops `POINTER_TIP_GAP` short of the zone's inner edge and
-  the wedge reaches inward from there, so the strip stays the bands' and markers' alone.
-  Markers reach *in* from the track; the pointer reaches *out* at it, which is what keeps
-  the two from being read as one another.
+- **"Now" is a different *shape* on flint than on the colour displays,** and it is the
+  only element on the face that is. See `strip_draw_now`. Where there is colour it is a
+  red rule struck across the strip — over the bands, the notches and the markers alike,
+  as deep as the strip's own elements go and no deeper — and a line *through* the ruler
+  says "the ruler is here" without having to be learned. That only works in a hue nothing
+  else on the strip uses, so on `flint` it would be a black line across a ruler made of
+  black lines, i.e. a thicker notch, which is already what an hour notch is. `flint`
+  therefore keeps the wedge.
+- **flint's wedge sits inside the notch zone, not in it, and points the other way.** Its
+  apex stops `POINTER_TIP_GAP` short of the zone's inner edge and the wedge reaches inward
+  from there, so the strip stays the bands' and markers' alone. Markers reach *in* from
+  the track; the wedge reaches *out* at it, which is what keeps the two from being read as
+  one another. The colour displays do not need this distinction because a rule is not a
+  wedge in the first place.
+- **The hour numbers sit at a different depth on `flint` than on the colour displays.**
+  See `label_x` in `geometry.c`. On colour they go past the rule and the markers with it,
+  where nothing can ever be over or under them. On `flint` they go *between* the ruler and
+  the wedge — three pixels off the notch ends, so they read as graduations of the ruler
+  rather than as a column beside the text — and that is free, because the wedge was
+  already claiming that area: `zone` on `flint` is what it was before the face had any
+  numbers on it at all, and so is the clock's size.
+- **Two different resolutions for one overlap, on `flint`, and the difference is
+  z-order.** The numbers share their area with the markers and the wedge both. A marker
+  the label *covers*: it knocks out its own footprint and draws over the top, exactly as
+  the text rows do, because a marker drawn on top cut a background slot through the digit
+  with its halo and the number came out unreadable while the marker lost nothing worth
+  having — and a marker's meaning is in its position, not its middle. The wedge covers the
+  *label*, being drawn last of everything so that nothing can hide it, and a plate cannot
+  win against something drawn later — so the label gets out of the way instead. The pad on
+  that plate is 2 px, not 0: cut to the box exactly, a marker's apex stopped one pixel
+  short of the first digit and the two read as one shape.
+- **The number nearest now is missing about two thirds of every hour on `flint`,** and
+  that is the wedge's suppression rule. It is the one label on the strip whose value is
+  also stated somewhere else: the clock is pinned to that wedge and is showing that very
+  hour, a few pixels to the right of the gap. Dropping any other label would lose
+  information; dropping this one loses a repetition.
+- **An hour label is placed by the same `step_in` the markers use, and branches on
+  nothing.** `label_x` is a depth along the ray, so the lane is vertical on a rectangle
+  and curves with the arc on `gabbro` for free. Its vertical correction is `ts.h / 8`, not
+  the clock's `ts.h / 20`: at ten pixels of content box a twentieth truncates to zero, and
+  the label drew a pixel and a half low until it was measured off a screenshot. At this
+  size integer division is a design decision.
 - **A halo is a grown filled shape, never a wide stroked outline.** See `draw_tri` in
   `geometry.c`. A stroked path miters its corners, and the miter at a sharp vertex runs
   *far* past the vertex — enough to clear the pointer's tip gap and punch a
   background-coloured slot through an appointment band. Growing the vertices away from
   the centroid instead bounds the halo at any angle.
-- **The pointer is drawn last, after the text.** See `proto.c`. The clock is pinned to
+- **The now mark is drawn last, after the text.** See `proto.c`. The clock is pinned to
   it, so the two are adjacent by construction and the clock's background knockout was
   erasing the one element every marker is measured against.
-- **The pointer is ink, not the accent colour.** It shared `GColorVividCerulean` with the
+- **The now mark is not the accent colour.** It shared `GColorVividCerulean` with the
   band and vanished whenever now fell inside a running appointment — which is most of the
-  time it matters.
+  time it matters. It went to ink next, and to red on the colour displays when it became a
+  rule, because a rule lies over cerulean, black and amber at once and red is the only
+  entry in `theme.h` that is none of them. Red is therefore spent twice now — here and on
+  the companion-down alert — where it used to be reserved for the alert alone.
 - **Both bands use one hue.** `GColorCeleste` was too pale to see on white, and a second
   tint is redundant when depth and notch-inversion already say it.
 - **Text rows knock out their own footprint** before drawing. Cheap (the background is
@@ -326,6 +368,22 @@ code; this is the index.
 - **The date is `%a %d`, not `%a %d %b`.** There is not room for the month at a readable
   size beside the strip on any of the three platforms — `gabbro`'s chord at the date's
   height is the tightest.
+- **The rows are left-aligned on the rectangles and centred on `gabbro`.** See `ROW_ALIGN`
+  in `geometry.h`. It is not a shape that was given up on: a chord's left edge moves 66 px
+  between the clock's height and the warnings row's, so one shared left edge there is
+  either a staircase or, if a single x is forced on all five rows, narrow enough at the
+  clock's height to clip `"00:00"`. What the circle does give free is a shared *centre* —
+  `fit_row`'s left and right are symmetric about `center.x + zone/2` at every height — so
+  centred rows already line up into the column that left-aligning is after.
+- **Row spacing is a signed gap, and it starts positive.** See `gap_n`/`gap_d` in
+  `layout_compute`. It used to be negative on purpose: the rows overlapped by a tenth of
+  the row above, because a content box is taller than the ink in it and the gaps read
+  wider than they measure. True, and overdone — the ink slack hides a few pixels, not a
+  whole row's tenth. The clamps drive the gaps back down through zero into a tuck under
+  pressure, so a font set that does not fit still fails as rows abutting rather than as
+  text crossing text. The gaps may not grow into the nav row's height, which is a
+  different thing from nav reserving space: nothing below the countdown moves whether nav
+  draws or not.
 
 ## Architecture notes
 

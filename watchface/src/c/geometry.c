@@ -85,10 +85,15 @@ GPoint step_side(GPoint p, int32_t a, int32_t d) {
 GRect text_plate(GRect box, GFont font, const char *text) {
   if (!text || !text[0]) return GRect(box.origin.x, box.origin.y, 0, 0);
   GSize ts = graphics_text_layout_get_content_size(
-      text, font, box, GTextOverflowModeFill, GTextAlignmentCenter);
+      text, font, box, GTextOverflowModeFill, ROW_ALIGN);
+  // A pixel of pad on the leading edge where the row is left-aligned, two everywhere
+  // else. `zone` carries exactly two pixels of clearance past the pointer's base, so
+  // a left-aligned plate reaching two back would sit on the pointer itself.
   int16_t pad = 2;
-  return GRect(box.origin.x + (box.size.w - ts.w) / 2 - pad, box.origin.y,
-               ts.w + 2 * pad, box.size.h);
+  int16_t x = PBL_IF_ROUND_ELSE(box.origin.x + (box.size.w - ts.w) / 2 - pad,
+                                box.origin.x - 1);
+  int16_t w = PBL_IF_ROUND_ELSE(ts.w + 2 * pad, ts.w + 1 + pad);
+  return GRect(x, box.origin.y, w, box.size.h);
 }
 
 void knock_out(GContext *ctx, GRect r) {
@@ -180,6 +185,12 @@ void draw_track_triangle(GContext *ctx, const Layout *lo, int32_t u,
 // the arc is leftmost at nine o'clock, so a row above or below that has the arc
 // pushed rightward into it, and the chord narrowing at the same time. Measuring at
 // that edge is pessimistic within the row, which is what is wanted.
+//
+// One chord, measured on the one circle the strip and the glass share, with `zone` taken
+// off the left. That is also what keeps the round display's rows in a column: `left` and
+// `right` are symmetric about center.x + zone/2 at every height, so rows whose available
+// width varies by a factor of two still share a centre. It is the property the circle
+// offers in place of the shared left edge it will not have — see ROW_ALIGN.
 static GRect fit_row(GRect box, const Layout *lo) {
 #ifdef PBL_ROUND
   int16_t mid = box.origin.y + box.size.h / 2;
@@ -202,7 +213,7 @@ static GRect fit_row(GRect box, const Layout *lo) {
 }
 
 Layout layout_compute(GRect bounds, GFont num_font, GFont date_font,
-                      GFont slot_font) {
+                      GFont slot_font, GFont tick_font) {
   Layout lo;
   lo.bounds = bounds;
   lo.center = GPoint(bounds.origin.x + bounds.size.w / 2,
@@ -214,14 +225,42 @@ Layout layout_compute(GRect bounds, GFont num_font, GFont date_font,
   lo.margin = margin;
   lo.notch_len = lo.radius / 9;
 
-  // What the strip claims inward from the track: the notch zone, and then
-  // whichever of the pointer or the deepest marker reaches further past it.
-  // Reserved before any row is placed, because a row placed into it would be
-  // knocked out from under the one element every marker is measured against.
-  int16_t pointer_reach = lo.notch_len + POINTER_TIP_GAP
-                        + lo.notch_len * POINTER_LEN_PCT / 100;
-  int16_t marker_reach = lo.notch_len * MARKER_GROUP_PCT / 100;
-  lo.zone = (marker_reach > pointer_reach ? marker_reach : pointer_reach) + 2;
+  // The hour labels' width — measured, not chosen. "00" is the widest an hour ever
+  // gets, in 24-hour style or 12; the 12-hour case just centres a narrower glyph in the
+  // same lane, so no label moves as the day goes on.
+  GSize ls = graphics_text_layout_get_content_size(
+      "00", tick_font, GRect(0, 0, bounds.size.w, bounds.size.h),
+      GTextOverflowModeFill, GTextAlignmentCenter);
+  lo.label_w = ls.w;
+
+  // The depth ladder, and its rungs are in a different order on the two kinds of
+  // display because "now" is a different element on them. `zone` is the end of it
+  // either way: what the strip claims inward from the track, all of it, reserved
+  // before any row is placed, because a row placed into it would be knocked out from
+  // under the elements the timeline is read off.
+#ifndef PBL_COLOR
+  int16_t p_len = lo.notch_len * POINTER_LEN_PCT / 100;
+#endif
+#ifdef PBL_COLOR
+  // The rule strikes through exactly what the strip draws and no further, and a merged
+  // marker is the deepest of that. The labels then start past all of it, so nothing is
+  // ever over or under them.
+  lo.rule_len = lo.notch_len * MARKER_GROUP_PCT / 100;
+  lo.label_x = lo.rule_len + LABEL_GAP;
+  lo.zone = lo.label_x + lo.label_w + 2;
+#else
+  // flint puts the labels between the ruler and the wedge — into the free area the wedge
+  // was already claiming, not past it. So the wedge keeps the tip gap and the length it
+  // always had, its base still closes the zone, and the labels cost the content column
+  // nothing at all: `zone` is what it was before there were any numbers on this face.
+  // The two overlap in depth and are dealt with in time instead, by dropping the label
+  // the wedge lands on. See draw_hour_label.
+  lo.label_x = lo.notch_len + LABEL_GAP;
+  lo.ptr_tip = lo.notch_len + POINTER_TIP_GAP;
+  int16_t label_end = lo.label_x + lo.label_w;
+  int16_t ptr_end = lo.ptr_tip + p_len;
+  lo.zone = (label_end > ptr_end ? label_end : ptr_end) + 2;
+#endif
 
 #ifdef PBL_ROUND
   lo.arc_r = lo.radius - margin;
@@ -270,13 +309,19 @@ Layout layout_compute(GRect bounds, GFont num_font, GFont date_font,
   int16_t slot_h = ss.h + 4;
   int16_t count_h = slot_h + PROGRESS_GAP + lo.bar_h;
 
-  // The date and the countdown belong to the clock — they qualify it — so they are
-  // tucked up under it rather than spread through the space below. A tuck is a tenth
-  // of the row above, which scales with the font rather than with the display: a
-  // content box is taller than the ink in it, so the rows read as further apart than
-  // the gaps say they are.
-  int16_t tuck_n = ns.h / 10;
-  int16_t tuck_d = ds.h / 10;
+  // The date and the countdown still belong to the clock — they qualify it — but they
+  // are given air now rather than tucked under it. A fifth and a quarter of the row
+  // above, which scales with the font rather than with the display.
+  //
+  // These are signed, and that is what replaced the two tuck constants that used to
+  // live here. Spacing on this face was *negative* — the rows overlapped by a tenth of
+  // the row above, on the reasoning that a content box is taller than the ink in it, so
+  // the gaps read wider than they measure. True, and it was overdone: the ink slack
+  // hides a few pixels, not a whole row's tenth. Starting positive and letting the
+  // clamps below drive them back down through zero into a tuck keeps the old
+  // behaviour as the failure mode without keeping it as the default.
+  int16_t gap_n = ns.h / 5;
+  int16_t gap_d = ds.h / 4;
 
   // Pinned at both ends. The clock's centre goes on the pointer; the warnings row
   // goes on the bottom.
@@ -297,35 +342,53 @@ Layout layout_compute(GRect bounds, GFont num_font, GFont date_font,
   // is the generated resource's metrics and not the source font's.
   // And it goes on the *pointer*, not on the point of the track the pointer marks.
   //
-  // Those are the same y on a rectangle, where the ray is horizontal and the wedge
+  // Those are the same y on a rectangle, where the ray is horizontal and the mark
   // reaches straight in. On gabbro's arc they are not: the ray at the quarter mark
-  // runs down and to the right, so the wedge's body sits about a dozen pixels below
-  // the arc point its apex touches, and a clock levelled with the apex reads as
-  // sitting above the thing it is supposed to line up with. The eye lines up with
-  // the shape, so the shape is what to measure.
+  // runs down and to the right, so the mark's body sits some way below the arc point
+  // it touches, and a clock levelled with that point reads as sitting above the thing
+  // it is supposed to line up with. The eye lines up with the shape, so the shape is
+  // what to measure — whichever shape this display's "now" is. On colour that is a
+  // rule struck across the strip and its middle is half its length in; on flint it is
+  // the wedge, whose body starts past the notch zone.
   Track ptr = track_at(&lo, STRIP_BACK_S);
-  int16_t p_tip = lo.notch_len + POINTER_TIP_GAP;
-  int16_t p_len = lo.notch_len * POINTER_LEN_PCT / 100;
-  int16_t py = step_in(ptr.p, ptr.a, p_tip + p_len / 2).y;
+  int16_t p_mid = PBL_IF_COLOR_ELSE(lo.rule_len / 2, lo.ptr_tip + p_len / 2);
+  int16_t py = step_in(ptr.p, ptr.a, p_mid).y;
 
   int16_t top = py - num_h / 2 - ns.h / 20;
   if (top < span_top) top = span_top;
 
-  // A font set that does not fit has to show up as rows abutting, never as text
-  // crossing another row, so the tucks absorb an overrun before anything else does.
-  int16_t need = num_h - tuck_n + date_h - tuck_d + count_h;
   int16_t room = lo.warn_box.origin.y - top - 2;
+  int16_t fixed = num_h + date_h + count_h;
+
+  // The air may not be taken out of the nav row. Nav still reserves nothing in the
+  // flow — nothing below the countdown moves whether it draws or not, which is what
+  // seats five rows in four rows' height — but there is a difference between a row
+  // that claims no space and a row whose space is fair game for spacing above it. What
+  // is left after the three fixed rows, less a nav-sized hole, is the gap budget.
+  int16_t budget = room - fixed - (slot_h + 2);
+  if (budget < 0) budget = 0;
+  int16_t want = gap_n + gap_d;
+  if (want > budget) {
+    // Proportionally, so the two gaps keep their ratio as they give way.
+    gap_n = (int16_t)((int32_t)gap_n * budget / want);   // want > budget >= 0, so != 0
+    gap_d = budget - gap_n;
+  }
+
+  // A font set that does not fit has to show up as rows abutting, never as text
+  // crossing another row. Past zero the gaps go negative and are tucks again, which is
+  // exactly what this clamp used to do to the tucks themselves.
+  int16_t need = fixed + gap_n + gap_d;
   if (need > room) {
     int16_t over = (need - room + 1) / 2;
-    tuck_n += over;
-    tuck_d += over;
+    gap_n -= over;
+    gap_d -= over;
   }
 
   int16_t y = top;
   lo.num_box = GRect(bounds.origin.x, y, bounds.size.w, num_h);
-  y += num_h - tuck_n;
+  y += num_h + gap_n;
   lo.date_box = GRect(bounds.origin.x, y, bounds.size.w, date_h);
-  y += date_h - tuck_d;
+  y += date_h + gap_d;
   lo.count_box = GRect(bounds.origin.x, y, bounds.size.w, count_h);
   y += count_h;
 

@@ -20,7 +20,9 @@
 // the shape.
 //
 // Drawing is then one pass per layer, outward to inward in z-order: bands,
-// notches, markers, pointer.
+// notches, markers, pointer. The hour labels ride with the notches, being the
+// same thing — a graduation of the ruler — and are the one part of the strip
+// that draws *outboard* of the track.
 //
 // The arrays are file-scope rather than automatic. A Pebble app's stack is
 // small and this is 241 bytes that would otherwise be live across four calls.
@@ -45,6 +47,15 @@ typedef struct {
 
 static Point s_pts[EVENTS_MAX];
 static int   s_pt_n;
+
+// The hour boundaries in the visible window, and their wall-clock hour. Filled while
+// the notches are walked and drawn in a pass of their own afterwards, because a label
+// has to land *over* the markers and the notches are drawn under them on flint.
+//
+// A four-hour window holds four or five of these; six is room to spare.
+typedef struct { int32_t u; uint8_t hh; } Hour;
+static Hour s_hours[6];
+static int  s_hour_n;
 
 // A band this thin would otherwise vanish. Three minutes is about two pixels on
 // flint, so this only ever rescues something shorter than that.
@@ -102,6 +113,15 @@ static int16_t marker_half(const Layout *lo) {
   int16_t hl = lo->radius / 16;
   return (hl < 4) ? 4 : hl;
 }
+
+#ifndef PBL_COLOR
+// The same, for flint's wedge: its base spans this either side of now. Two callers —
+// the wedge itself and the hour label that has to get out of its way.
+static int16_t pointer_half(const Layout *lo) {
+  int16_t phw = lo->notch_len * POINTER_HALF_PCT / 100;
+  return (phw < 5) ? 5 : phw;
+}
+#endif
 
 static void build_points(const Layout *lo, time_t now) {
   s_pt_n = 0;
@@ -215,6 +235,101 @@ static bool notch_inverts(int32_t u) {
 #endif
 }
 
+// An hour label, in a lane inboard of the track. Where in the ladder that lane sits is
+// per-display and lives in layout_compute; see `label_x`. On colour it is past the rule
+// and the markers both, and nothing is ever over or under it. On flint it is between the
+// ruler and the wedge, sharing that free area with the markers and the wedge — and a
+// label really does want the same pixels as those, often, a reminder landing on the hour
+// being an ordinary thing rather than a coincidence.
+//
+// Against a marker the label wins: it knocks out its own footprint and draws over the
+// top, which is what every text row on this face already does and for the same reason.
+// Drawn the other way round, with the marker on top, its background halo cut a slot clean
+// through the digit and the number came out unreadable while the marker lost nothing
+// worth having. The marker is still there above and below the plate, and it is the
+// *position* of a marker that carries its meaning, not its middle.
+//
+// Against the wedge the label loses, and gets out of the way rather than being covered —
+// see the suppression below.
+//
+// The plate can only ever cut a marker or a band: the notches end three pixels outboard
+// of this lane, and the wedge is not on the screen yet when this runs.
+//
+// One expression covers both display shapes, the same way the markers get one: `label_x`
+// is a depth along the ray, so on a rectangle this is a box in a vertical lane and on
+// gabbro's arc it is a box centred on the ray, the lane curving with the strip. Nothing
+// here branches on shape.
+static void draw_hour_label(GContext *ctx, const Layout *lo, GFont font,
+                            int32_t u, int hh) {
+  char buf[4];
+  if (clock_is_24h_style()) {
+    snprintf(buf, sizeof buf, "%02d", hh);
+  } else {
+    // Same reasoning as the clock's leading zero: "07" is not how anyone reads a
+    // twelve-hour dial. The lane is sized on "00" either way, so a one-digit hour
+    // centres in it rather than moving the lane.
+    int h = hh % 12;
+    snprintf(buf, sizeof buf, "%d", h ? h : 12);
+  }
+
+  GSize ts = graphics_text_layout_get_content_size(
+      buf, font, lo->bounds, GTextOverflowModeFill, GTextAlignmentCenter);
+
+  // Drop a label that would hang off either end of the window rather than let it draw
+  // half a digit. Expressed in seconds, like every other extent on the track: the
+  // label's own half-height, converted. Conservative by a pixel or two, because a
+  // content box is taller than the ink in it.
+  int32_t edge = u_of_px(lo, ts.h / 2);
+  if (u < edge || u > STRIP_SPAN_S - edge) return;
+
+#ifndef PBL_COLOR
+  // And drop the one the wedge lands on. Everything else in this lane can be covered or
+  // covered over, but the wedge is drawn last of all — after the text rows, so that
+  // nothing can hide the element the whole strip is read against — and a plate cannot
+  // win against something drawn later.
+  //
+  // What is lost is the label nearest now, for the twenty minutes either side of the
+  // hour that the wedge is wide enough to reach: call it two thirds of every hour, one
+  // label of four or five. It is also the only label on the strip that is being stated
+  // somewhere else — the clock is pinned to this wedge and is showing that very hour, a
+  // few pixels to the right of the gap. Dropping any other label would lose information;
+  // dropping this one loses a repetition.
+  int32_t near = u_of_px(lo, pointer_half(lo) + ts.h / 2 + 1);
+  if (u > STRIP_BACK_S - near && u < STRIP_BACK_S + near) return;
+#endif
+
+  Track tr = track_at(lo, u);
+  GPoint q = step_in(tr.p, tr.a, lo->label_x + lo->label_w / 2);
+
+  // The same measured lift the clock takes, and for the same reason: a digits-only
+  // subset never descends below the baseline, so the box carries its slack above the ink
+  // and centring the box leaves the digits low. An eighth, not the clock's twentieth —
+  // measured off a flint screenshot, where a label drawn with no correction at all came
+  // out with its ink spanning y 24..29 against an hour notch centred on 25, a pixel and
+  // a half low. At this size a twentieth truncates to nothing, which is how it was
+  // found: the label is small enough that integer division is a design decision.
+  GRect box = GRect(q.x - lo->label_w / 2, q.y - ts.h / 2 - ts.h / 8,
+                    lo->label_w, ts.h);
+
+  // Two pixels wider than the box on each side, which is the pad text_plate() uses and
+  // is here for a reason a screenshot gave up: cut to the box exactly, a marker's apex
+  // stopped one pixel short of the first digit and the two read as one shape. Not three:
+  // the lane is LABEL_GAP off the notch zone, and three would take the tip off the hour
+  // notch this label is naming.
+  knock_out(ctx, GRect(box.origin.x - 2, box.origin.y,
+                       box.size.w + 4, box.size.h));
+  graphics_context_set_text_color(ctx, COL_INK);
+  graphics_draw_text(ctx, buf, font, box, GTextOverflowModeFill,
+                     GTextAlignmentCenter, NULL);
+}
+
+// Every hour boundary the last notch pass found, over the top of the strip.
+static void draw_labels(GContext *ctx, const Layout *lo, GFont font) {
+  for (int i = 0; i < s_hour_n; i++) {
+    draw_hour_label(ctx, lo, font, s_hours[i].u, s_hours[i].hh);
+  }
+}
+
 // The ruler. A notch every fifteen minutes, on the wall clock's own quarter hours
 // rather than at multiples of fifteen from the top of the window — which is what
 // makes the strip scroll: each minute every notch's position slides by the same
@@ -222,7 +337,11 @@ static bool notch_inverts(int32_t u) {
 // against.
 //
 // The hour notches are thicker, not longer. Length is already spoken for: it is what
-// separates a notch from a band, which fills part of the same depth.
+// separates a notch from a band, which fills part of the same depth. They are also the
+// ones that carry a number, which is what makes the strip say *when* rather than only
+// how far off — four or five labels in the window, and the reader stops counting
+// notches from the "now" mark. This pass only records where they are; draw_labels()
+// puts them on the screen once everything they have to sit over is down.
 static void draw_notches(GContext *ctx, const Layout *lo, time_t now) {
   int16_t hour_w = stroke_px(lo->radius / 24);
   if (hour_w < 3) hour_w = 3;
@@ -238,12 +357,20 @@ static void draw_notches(GContext *ctx, const Layout *lo, time_t now) {
   int32_t back = lt.tm_sec + (lt.tm_min % NOTCH_STEP_MIN) * 60;
   time_t t = start - back;
   int m = (lt.tm_min / NOTCH_STEP_MIN) * NOTCH_STEP_MIN;
+
+  // The hour rides along for the same reason and by the same rule: it is the hour of
+  // `t`, and from a quarter-hour boundary it only ever advances when the minute wraps
+  // to zero. The one case that is not free is the step forward above — if that landed
+  // on the hour it crossed one, so the seed is already a step behind.
+  int hh = lt.tm_hour;
   if (back > 0) {
     t += NOTCH_STEP_MIN * 60;
     m = (m + NOTCH_STEP_MIN) % 60;
+    if (m == 0) hh = (hh + 1) % 24;
   }
 
-  for (; ; t += NOTCH_STEP_MIN * 60, m = (m + NOTCH_STEP_MIN) % 60) {
+  s_hour_n = 0;
+  for (;;) {
     int32_t u = (int32_t)(t - start);
     if (u > STRIP_SPAN_S) break;
 
@@ -252,6 +379,16 @@ static void draw_notches(GContext *ctx, const Layout *lo, time_t now) {
 
     Track tr = track_at(lo, u);
     graphics_draw_line(ctx, tr.p, step_in(tr.p, tr.a, lo->notch_len));
+
+    if (m == 0 && s_hour_n < (int)(sizeof s_hours / sizeof s_hours[0])) {
+      s_hours[s_hour_n++] = (Hour){ .u = u, .hh = (uint8_t)hh };
+    }
+
+    // Advanced here rather than in the for-increment, so the hour can follow the
+    // minute's wrap.
+    t += NOTCH_STEP_MIN * 60;
+    m = (m + NOTCH_STEP_MIN) % 60;
+    if (m == 0) hh = (hh + 1) % 24;
   }
 }
 
@@ -295,33 +432,50 @@ static void draw_markers(GContext *ctx, const Layout *lo) {
   }
 }
 
-// The pointer, and the reason the strip is readable at all: without it a marker
-// two notches down has no "now" to be relative to. It never moves — the ruler
-// moves past it — which is what lets the clock beside it be plain digits.
+// "Now", and the reason the strip is readable at all: without it a marker two notches
+// down has no now to be relative to. It never moves — the ruler moves past it — which is
+// what lets the clock beside it be plain digits.
 //
-// It points *outward*, back at the track, which is what keeps it distinct from the
-// point markers: those reach inward from the track, this one reaches out toward it.
-// The two never share a zone either — the tip stops short of the notch zone's inner
-// edge, so the whole pointer lives in the free area and the strip stays the bands'
-// and markers' alone.
+// Drawn after the text rows rather than with the rest of the strip, and last of
+// everything: the clock is pinned to it, so the two are adjacent by construction, and
+// the clock's background knockout was erasing it outright. Nothing on this face may
+// hide the one element everything else is measured against.
 //
-// Drawn after the text rows rather than with the rest of the strip: the clock's
-// centre is pinned to this pointer, so the two are adjacent by construction, and the
-// clock's background knockout was erasing it outright. Nothing on this face may hide
-// the one element everything else is measured against. The halo is what keeps it
-// legible where it meets a band in the same ink.
+// The shape is not the same on both kinds of display, and this is the one place on the
+// face where that is true of an element rather than of its colour.
+//
+// Where there is colour it is a **rule struck across the strip** — through the bands,
+// the notches and the markers alike, over the top of all of them, as deep as the strip's
+// own elements go and no deeper. What it costs to read that way it takes back in hue: red
+// is not on the strip anywhere else, so a red line is unambiguous at a glance, and a line
+// *through* the ruler says "the ruler is here" in a way a shape beside it has to be
+// learned to mean. It also frees the whole free area, which is where the hour labels
+// went.
+//
+// flint gets the wedge, because a black rule there would be a black line across a ruler
+// made of black lines — an extra notch, thicker than its neighbours, which is already
+// what an hour notch is. So up there "now" stays a shape, it points *outward* back at
+// the track, and that direction is what keeps it distinct from the point markers, which
+// reach inward. Its tip stops short of the notch zone so the strip stays the bands' and
+// markers' alone, and the halo keeps it legible where it meets a band in the same ink.
 void strip_draw_now(GContext *ctx, const Layout *lo) {
   Track t = track_at(lo, STRIP_BACK_S);
 
-  int16_t phw = lo->notch_len * POINTER_HALF_PCT / 100;
-  if (phw < 5) phw = 5;
+#ifdef PBL_COLOR
+  int16_t w = stroke_px(lo->radius / RULE_W_DIV);
+  if (w < 3) w = 3;
+  graphics_context_set_stroke_color(ctx, COL_INDEX);
+  graphics_context_set_stroke_width(ctx, w);
+  graphics_draw_line(ctx, t.p, step_in(t.p, t.a, lo->rule_len));
+#else
+  int16_t phw = pointer_half(lo);
   int16_t len = lo->notch_len * POINTER_LEN_PCT / 100;
 
-  int16_t tip = lo->notch_len + POINTER_TIP_GAP;
-  GPoint apex = step_in(t.p, t.a, tip);
-  GPoint base = step_in(t.p, t.a, tip + len);
+  GPoint apex = step_in(t.p, t.a, lo->ptr_tip);
+  GPoint base = step_in(t.p, t.a, lo->ptr_tip + len);
   draw_tri(ctx, apex, step_side(base, t.a, phw), step_side(base, t.a, -phw),
            COL_INDEX, true, 1, true);   // filled: the stroke width is unused
+#endif
 }
 
 // Outward to inward, except for where the notches sit in the stack.
@@ -334,7 +488,11 @@ void strip_draw_now(GContext *ctx, const Layout *lo) {
 // flint keeps the notches underneath the markers. Up there a notch over a solid
 // marker would have to invert to be visible at all, and that background-coloured cut
 // would split the one shape that says "overdue" straight down the middle.
-void strip_draw(GContext *ctx, const Layout *lo, time_t now) {
+//
+// The hour labels go last on both, which is the one part of this order that is not a
+// choice: a label knocks out its own footprint, so anything it may cover has to already
+// be drawn.
+void strip_draw(GContext *ctx, const Layout *lo, time_t now, GFont tick) {
   build_coverage(now);
   build_points(lo, now);
   draw_bands(ctx, lo);
@@ -345,4 +503,5 @@ void strip_draw(GContext *ctx, const Layout *lo, time_t now) {
   draw_notches(ctx, lo, now);
   draw_markers(ctx, lo);
 #endif
+  draw_labels(ctx, lo, tick);
 }
