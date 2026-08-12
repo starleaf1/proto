@@ -119,7 +119,7 @@ unpacker could share the same mistake as the packer and both would agree.
 
 ## Not yet implemented: navigation
 
-The protocol keys, the watch's turn-arrow glyphs, the top slot's priority resolution and
+The protocol keys, the watch's turn-arrow glyphs, the warnings row's priority resolution and
 the nav-slot expiry timer all exist and work — `pebble send-app-message` can drive them
 end to end (see `docs/protocol.md`). Nothing on this side populates them.
 

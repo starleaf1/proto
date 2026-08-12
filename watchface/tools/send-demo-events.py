@@ -3,18 +3,19 @@
 
 `PROTO_DEMO=1 pebble build` compiles the same entries in. This sends them instead,
 which is better in two ways: the decode path in `wire.c` is exercised rather than
-bypassed, and the dial can be changed without rebuilding and reinstalling. It also
+bypassed, and the strip can be changed without rebuilding and reinstalling. It also
 means a shipping build is never the one used for screenshots.
 
 pebble-tool grew `--bytes`/`--bytes-file` in 5.0.39; before that the packed blob
 genuinely had no command-line path, which is why `demo_seed()` exists at all.
 
 The set covers every marker case at once — a running band, two overlapping bands that
-must flatten into one, clustered point entries that must merge, an overdue reminder,
-and a marker sitting on top of a band. **Keep it in step with `demo_seed()` in
-`src/c/proto.c`**; the two are meant to show the same face.
+must flatten into one, clustered point entries that must merge, an overdue reminder, a
+marker sitting on top of a band, and one entry past the horizon that must not draw at
+all. **Keep it in step with `demo_seed()` in `src/c/proto.c`**; the two are meant to
+show the same face.
 
-    tools/send-demo-events.py                     # flush, then the eight entries
+    tools/send-demo-events.py                     # flush, then the nine entries
     tools/send-demo-events.py --emulator gabbro
     tools/send-demo-events.py --clear             # flush carrying no records
     tools/send-demo-events.py --remove 5 6        # delta: two removes, no flush
@@ -72,14 +73,15 @@ DEFAULT_PLATFORM = "flint"
 
 # id, start offset in minutes from now, duration in minutes, kind, why it is here.
 DEMO = [
-    (1, -20, 90, EV_APPOINTMENT, "running: solid band + count-up"),
-    (2, 150, 60, EV_APPOINTMENT, "overlaps 3 -- the two must flatten to one band"),
-    (3, 180, 90, EV_APPOINTMENT, "overlaps 2"),
+    (1, -20, 90, EV_APPOINTMENT, "running: deep band across the pointer + count-up"),
+    (2, 100, 40, EV_APPOINTMENT, "overlaps 3 -- the two must flatten to one band"),
+    (3, 120, 45, EV_APPOINTMENT, "overlaps 2"),
     (4, 40, 45, EV_APPOINTMENT, "inside 3 h, not 30 min"),
-    (5, -40, 0, EV_TASK, "overdue: solid triangle"),
-    (6, 300, 0, EV_TASK, "6 min from 7 -- same notch"),
-    (7, 306, 0, EV_TASK, "-> one deeper marker"),
-    (8, 200, 0, EV_TASK, "sits on top of a band"),
+    (5, -40, 0, EV_TASK, "overdue: solid wedge"),
+    (6, 160, 0, EV_TASK, "4 min from 7 -- too close to draw apart"),
+    (7, 164, 0, EV_TASK, "-> one deeper marker"),
+    (8, 110, 0, EV_TASK, "sits on top of a band"),
+    (9, 200, 0, EV_TASK, "past the 3 h horizon -- must not draw"),
 ]
 
 

@@ -3,12 +3,13 @@
 A Pebble watchface and its phone-side companion, developed together in one
 repository.
 
-The watchface turns a twelve-hour dial into a **six-hour timeline**. Appointments in
-the next six hours are arcs spanning their duration, at their real clock position;
-tasks and reminders are triangles at the notch they fall nearest. Two single-line slots
-sit inside the ring — the top one alerts, the bottom one counts down to whatever is
-next. An idle face is a dial, the minute, and the date: nothing appears unless it has
-something to say.
+The watchface reads the left edge of the display as a **four-hour timeline**, running
+downward: one hour behind, three ahead, notched every fifteen minutes, with a pointer at
+the quarter mark that never moves. The ruler slides past it as the clock advances.
+Appointments are bands spanning their duration; tasks and reminders are wedges poking
+inward off the ruler. Beside it, level with the pointer, a digital clock — then the date,
+a countdown, the next turn, and whatever is running out, stacked downward. An idle face
+is the strip, the clock, and the date: nothing appears unless it has something to say.
 
 Pebble has no on-watch access to a phone's calendar, so the entries are pushed over
 Bluetooth by a native **Android** companion. This repo houses both sides.
@@ -62,7 +63,7 @@ pebble install --emulator flint       # or emery, or gabbro
 pebble install --phone <ip>           # install to a paired phone
 ```
 
-To put something on the dial without the companion, send the demo calendar — a
+To put something on the strip without the companion, send the demo calendar — a
 synthetic set of entries covering every marker case:
 
 ```sh

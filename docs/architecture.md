@@ -6,17 +6,17 @@
 ┌────────────────────────────┐            AppMessage             ┌──────────────────────────┐
 │  Phone companion           │  Heartbeat, CalEvents, CalFlags,  │  Pebble watchface        │
 │  (pipe/ — Android)         │  NavManeuver/Distance/Unit,       │  (watchface/)            │
-│  reads the calendar and    │  PhoneBattery                     │  draws a six-hour        │
-│  the phone's battery       │  (phone → watch)                  │  timeline on the dial,   │
-│                            │  ───────────────────────────────► │  plus two single-line    │
-│                            │   on change, plus a liveness beat │  slots inside it         │
+│  reads the calendar and    │  PhoneBattery                     │  draws a four-hour       │
+│  the phone's battery       │  (phone → watch)                  │  timeline down the left  │
+│                            │  ───────────────────────────────► │  edge, plus a clock and  │
+│                            │   on change, plus a liveness beat │  three rows beside it    │
 └────────────────────────────┘                                   └──────────────────────────┘
 ```
 
 The dividing line: **the phone decides meaning, the watch decides pixels.** The
 companion resolves which entries exist, when they start, how long they run, and
-whether one is an appointment or a reminder. The watch turns that into arcs,
-triangles and colours. No colour crosses the wire, because the companion cannot know
+whether one is an appointment or a reminder. The watch turns that into bands,
+wedges and colours. No colour crosses the wire, because the companion cannot know
 which watch model is on the other end — and one of the three is black-and-white.
 
 ## What the face answers
@@ -25,13 +25,16 @@ Not "how many things are waiting for me" — that was the previous design, and i
 a notification listener to count things. This one answers **"what are my next few
 hours, and is anything wrong right now"**.
 
-- **The dial is a twelve-hour clock face used as a timeline.** Appointments in the
-  next six hours are arcs spanning their duration, at their real clock position.
-  Tasks and reminders are triangles at the notch they fall nearest.
-- **The top slot alerts**, one thing at a time, highest priority only.
-- **The bottom slot counts down** to whatever is next, or up through whatever is
-  running.
-- **Nothing else is drawn.** An idle face is a dial, the minute, and the date.
+- **The strip is a four-hour timeline down the left edge**, later always lower: one hour
+  above the pointer, three below, notched every fifteen minutes with the hours thicker.
+  Appointments are bands spanning their duration; tasks and reminders are wedges at their
+  exact position, merged only where two would overlap.
+- **The pointer never moves.** It sits at the quarter mark and the ruler scrolls past it.
+- **The clock is plain digits**, level with the pointer, honouring the 12/24-hour setting.
+- **The countdown** counts down to whatever is next, or up through whatever is running —
+  and a progress bar under the digits is what says which.
+- **Nav, then warnings**, stacked below, each drawn only when it has something to say.
+- **Nothing else is drawn.** An idle face is the strip, the clock, and the date.
 
 ## Certainty, restated
 
@@ -39,10 +42,10 @@ The previous design expressed a loss of certainty by *hiding* its phone-fed icon
 had counts, a count cannot be checked, and a stale one is a silent lie.
 
 Calendar entries are not counts. An entry is timestamped, so it ages out on its own,
-and a marker that is six hours old has already left the window. That changes the right
+and a marker that is hours old has already scrolled off the strip. That changes the right
 answer: **uncertainty becomes something the face states rather than something it
-silently omits.** "Companion disconnected" is the top slot's first priority, and the
-calendar keeps drawing underneath it.
+silently omits.** "Companion disconnected" is the bottom row's first priority, and the
+calendar keeps drawing above it.
 
 The watch still owns three things outright — the time, the date and its own battery —
 and those are never gated on anything.
@@ -56,54 +59,64 @@ One window, one layer, one update proc, split across seven small modules.
 | File | Owns |
 | --- | --- |
 | `proto.c` | Lifecycle, the service handlers, and the paint order. |
-| `geometry.{c,h}` | The dial's trigonometry and the vertical layout. |
+| `geometry.{c,h}` | The track, and the vertical layout. |
 | `theme.h` | The whole palette and the three font choices. |
-| `events.{c,h}` | The event table, the live window, the linger rules, and which entry the bottom slot should show. |
-| `dial.{c,h}` | Bands, notches, markers, the hour index. |
-| `slots.{c,h}` | Both slots, and every glyph. |
+| `events.{c,h}` | The event table, the live window, the linger rules, and which entry the countdown should show. |
+| `strip.{c,h}` | Bands, notches, markers, the pointer. |
+| `slots.{c,h}` | The three conditional rows, and every glyph. |
 | `wire.{c,h}` | The AppMessage inbox and the two watchdogs. |
 | `wbatt.{c,h}` | The watch's own hours-remaining estimate. |
 
-**The dial** is one representation doing all the work: `uint8_t coverage[360]`, one
-byte per degree, holding the most prominent thing happening at that degree.
-Overlapping appointments flatten because they write the same array, and `max()` makes
-a merged band inherit the more urgent member's weight. Round and rectangular displays
-share one code path.
+**The track** is the one abstraction the renderer needs. `track_at(lo, u)` maps a
+position in the visible window — seconds from its top — to a point on the boundary plus
+the ray angle there. On a rectangle that angle is a constant 270°, which is to say a
+left-edge strip *is* the old dial's nine-o'clock ray: `step_in` moves inward toward the
+content, `step_side` moves along the track, and every primitive written for a ring works
+unchanged. On `gabbro` the angle sweeps a quarter turn down the left arc. One code path,
+two shapes.
+
+The cosine correction the dial needed is gone, and its absence is the point of the shape
+rather than an omission. A depth in pixels is only perpendicular to the boundary if the
+ray is the boundary's normal; on a rectangle traced around its perimeter it is not, and a
+band measured a third thinner at the corners. A circle's ray is its normal, and so is a
+vertical edge's, so both of the strip's shapes are square to their own boundary and a
+pixel count is already perpendicular.
+
+**Bands** are one representation doing all the work: `uint8_t coverage[240]`, one byte
+per *minute* of the visible window, holding the most prominent thing happening then.
+Overlapping appointments flatten because they write the same array, and `max()` makes a
+merged band inherit the more urgent member's weight. A minute is under a pixel of track
+on all three displays, so quantising to one costs nothing visible.
 
 Prominence never depends on colour, because `flint` has none. A running appointment is
 drawn to about two thirds of the notch zone's depth, an upcoming one to a third — both
-stopping short of the notch inner-ends, so the ring reads as a dial carrying a marker
-rather than as a coloured arc with ticks on it. A grouped marker is a deeper spike. Colour, where there is any, is layered on top of distinctions that
-already work without it — and where it is doing the work, the shape it stands in for
-is freed up. Point markers are solid wedges on the colour platforms, amber against
-orange saying upcoming against overdue; on `flint` the upcoming one is hollow, because
-there the two are the same ink and fill is all that is left to separate them.
+stopping short of the notch inner-ends, so the strip reads as a ruler carrying a marker
+rather than as a coloured bar with ticks on it. A grouped marker is a deeper spike.
+Colour, where there is any, is layered on top of distinctions that already work without
+it.
 
-The notch ring's place in that stack is the one thing that does differ by display.
-On `emery` and `gabbro` it is drawn last, ink over everything, so an unbroken grid
-runs across the bands and the markers both. `flint` has no hue to carry the band, so
-a running one fills the zone in the same ink as the notches; there they invert to
-background where a running band crosses them, and they stay underneath the markers so
-that cut never splits a marker in half.
+A linear track pays for one of those distinctions outright: **overdue is above the
+pointer and upcoming is below it**, always. The dial could not say that — every point on
+a twelve-hour ring is both past and future — and it spent fill on the difference,
+drawing `flint`'s upcoming marker hollow. Position says it now, so every marker is solid
+everywhere, which is also what makes one legible where it crosses a band in the same ink.
 
-**The hour index** is why any of it is readable: absolute clock positions need a "now"
-to be measured against. It is drawn last, after everything, because both slots are
-centred — which puts them at twelve and six o'clock — and their background knockout
-would otherwise erase the one element everything else is relative to.
+The notches' place in the stack is the one thing that differs by display. On `emery` and
+`gabbro` they are drawn last, ink over everything, so an unbroken ruler runs across the
+bands and the markers both. `flint` has no hue to carry the band, so a running one fills
+the zone in the same ink as the notches; there they invert to background where a running
+band crosses them, and they stay underneath the markers so that cut never splits a
+marker in half.
 
-**The dial hugs the screen** — a circle on `gabbro`, the rectangular perimeter on
-`flint` and `emery`. That means equal spans of time cover unequal arc lengths on the
-two rectangular platforms, because a corner is 1.5× further from the centre than an
-edge midpoint. The distortion is accepted; the angle, which is what actually encodes
-the time, is exact everywhere.
+**The pointer** is why any of it is readable: positions on the strip need a "now" to be
+measured against. It reaches *out* at the track where markers reach *in* from it, which
+is what keeps the two apart, and it is drawn last, after everything, because the clock is
+pinned to it and the clock's background knockout would otherwise erase it.
 
-What is *not* allowed to vary is how thick a marker looks. Every depth is a count of
-pixels measured perpendicular to the boundary — never a fraction of the distance to it,
-and on a rectangle not a fixed distance along the ray either, since a ray leaving near a
-corner meets the edge at up to 49° and a constant radial depth would present only two
-thirds of itself across that edge. `depth_along_ray` divides the depth by the cosine of
-that angle, so the ray distance stretches toward a corner and the band reads as a ribbon
-of one thickness all the way round.
+**The clock lines up with the pointer's body**, not with the arc point its apex touches.
+Identical on a rectangle; on `gabbro` the ray runs down and to the right, so the wedge
+sits a dozen pixels below that point and levelling the clock with the apex reads as
+floating above it.
 
 ### `pipe/` — the Android companion
 
@@ -161,8 +174,12 @@ watchface untouched.
    passed and the six-hour window slid forward. All three land on one method,
    `PipeEngine.reconcile`.
 2. `CalendarSource` scans `[now − 2 h, now + 6 h]`, excluding whole-day entries — they
-   have no position on a twelve-hour dial — and anything cancelled. Duration comes
-   from `END - BEGIN`; a zero-length instance is a reminder.
+   have no position on a timeline and no duration that would fit one — and anything
+   cancelled. Duration comes from `END - BEGIN`; a zero-length instance is a reminder.
+
+   The phone's window is deliberately wider than the strip's `[now − 1 h, now + 3 h]`.
+   Entries past the horizon sit in the watch's table undrawn and scroll into view as the
+   window slides, which costs one message instead of one per quarter hour.
 3. `EventDiff` compares the scan against what the companion believes the watch holds.
    A reconnect skips the diff and sends a **flush** instead, because a watchface that
    relaunched holds nothing.
@@ -172,7 +189,8 @@ watchface untouched.
    layer dirty.
 6. The next paint recomputes the coverage array from scratch and draws it. Every
    marker's position, prominence and existence is a function of `now`, so the minute
-   tick is also what advances the countdown and retires whatever has aged out.
+   tick is also what advances the countdown, scrolls the ruler past the pointer, and
+   retires whatever has aged out.
 
 Steps 1–6 are the change path, and how fast a change arrives is governed by the
 `ContentObserver`: the scan and the send happen synchronously off it, so a calendar edit
@@ -184,7 +202,7 @@ per alarm — a second one at the same period would only make the first late. So
 re-scans the slid window, sends the delta if there is one, and otherwise speaks a bare
 heartbeat. Proving liveness needs no separate loop, because **any message arriving is the
 proof**; the `Heartbeat` key exists so a companion with no news can still say something.
-If the watch hears nothing for 2.5 declared periods, the top slot says so.
+If the watch hears nothing for 2.5 declared periods, the bottom row says so.
 
 **Calendar content never leaves the phone.** Titles, locations, attendees and
 descriptions are never read. The watch receives a position, a duration and two enum

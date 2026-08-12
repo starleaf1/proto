@@ -31,7 +31,7 @@ reads beautifully on `gabbro` can be invisible on `flint`.
 # Build for all three platforms
 pebble build
 
-# Build with a synthetic calendar seeded in — see "Testing the dial" below
+# Build with a synthetic calendar seeded in — see "Testing the strip" below
 PROTO_DEMO=1 pebble build
 
 # Clean build artifacts (required after adding a message key)
@@ -42,6 +42,9 @@ pebble install --emulator flint
 
 # Screenshot the running emulator
 pebble screenshot --no-open screenshot.png
+
+# ...or, when that hangs (it does in this environment), go straight to the framebuffer
+tools/grab.py flint --scale 4
 ```
 
 Everything except the calendar can be driven by numeric key id:
@@ -65,11 +68,12 @@ If you need more information on the `pebble` command or a sub-command, append
 > `message_keys.auto.h` is not regenerated incrementally, so the new `MESSAGE_KEY_*`
 > symbol comes back undeclared.
 
-### Testing the dial
+### Testing the strip
 
-Two ways in, both seeding the same set: a running band, two overlapping bands that must
-flatten into one, clustered point entries that must merge, an overdue reminder, and a
-marker sitting on top of a band.
+Two ways in, both seeding the same set: a running band across the pointer, two
+overlapping bands that must flatten into one, two point entries too close to draw apart
+that must merge, an overdue reminder above the pointer, a marker sitting on top of a
+band, and one entry past the three-hour horizon that must not draw at all.
 
 ```bash
 # Over the wire, against an ordinary build — preferred
@@ -133,8 +137,20 @@ it.
 - **An emulator can wedge while still looking alive.** Its `qemu` and `pypkjs` processes
   stay up and its port stays bound, but every command against it ends in
   `libpebble2.exceptions.TimeoutError`. Nothing recovers it — kill it and start again.
-- `pebble screenshot` has **no `--scale` flag** in pebble-tool 5.0.39. To inspect
-  detail, upscale the PNG afterwards with nearest-neighbour.
+- **`pebble screenshot` hangs indefinitely in this environment**, on every platform and
+  from a cold boot, with or without `--vnc`. `pebble install` over the same channel
+  succeeds, and so does `send-app-message`, so it is the firmware's screenshot endpoint
+  and not the connection. It is not caused by the app: a build of the previous commit
+  fails identically. **Use `tools/grab.py` instead** — it asks QEMU's own monitor socket
+  for `screendump`, which reads the framebuffer without involving the watch software at
+  all, and it upscales for you. `pebble screenshot` also has no `--scale` flag in
+  pebble-tool 5.0.39, which `grab.py` fixes on the way past.
+- **A failed `pebble screenshot` appears to wedge the channel for AppMessages too.** A
+  `send-demo-events.py` run after one still reports success and delivers nothing. If a
+  seed does not show up, restart the emulator and send before screenshotting rather than
+  after.
+- **`pkill -f pypkjs` self-kills exactly like `pkill -f qemu-pebble` does** — bracket
+  both: `pkill -f 'pypkj[s]'`.
 - **Colour correction is on by default** — the screenshot is remapped through a
   display-emulation LUT, so `GColorChromeYellow` comes out peachy and `GColorYellow`
   near-white. Pass `--no-correction` when asserting on exact palette RGB.
@@ -159,11 +175,11 @@ watchface/
 | Module | Owns |
 | --- | --- |
 | `proto.c` | Lifecycle, service handlers, paint order, the demo seed. |
-| `geometry.{c,h}` | Dial trigonometry, the vertical layout, chord fitting. |
+| `geometry.{c,h}` | The track, the vertical layout, chord fitting. |
 | `theme.h` | The whole palette and the three font choices. |
-| `events.{c,h}` | The event table, the live window, linger rules, bottom-slot choice. |
-| `dial.{c,h}` | Bands, notches, markers, the hour index. |
-| `slots.{c,h}` | Both slots and every glyph. |
+| `events.{c,h}` | The event table, the live window, linger rules, countdown choice. |
+| `strip.{c,h}` | Bands, notches, markers, the pointer. |
+| `slots.{c,h}` | The three conditional rows and every glyph. |
 | `wire.{c,h}` | The AppMessage inbox and the two watchdogs. |
 | `wbatt.{c,h}` | The watch's own hours-remaining estimate. |
 
@@ -176,97 +192,152 @@ Fonts are per-platform, three sizes each (`NUM_*`, `DATE_*`, `SLOT_*`), selected
 scaled by the SDK is not an option. The `characterRegex` subsets are aggressive —
 **adding a glyph to any string means editing the regex** in `package.json`.
 
+**The clock is the constraint on the whole layout, and it is a width constraint.**
+`"00:00"` in Orbitron measures 3.55 em, so `NUM_*` may not exceed roughly the content
+column's width divided by 3.55 — and the column is what is left after the strip claims
+the left edge. Over that, `graphics_draw_text` does not complain: it wraps the minutes
+onto a second line or replaces them with an ellipsis. Two traps when checking it:
+
+- **Orbitron's digits are not tabular.** `1` is about half the width of `0`, so a clock
+  reading `14:21` fits in a box that `20:08` overflows. Test the worst case, not the
+  current time — temporarily `strcpy(s_time_buf, "00:00")` is the honest check.
+- **The resource number is the em size, not the rendered width.** `NUM_28` puts about
+  20px of ink height and 99px of `"00:00"` on the screen.
+
 ## Design decisions that look like bugs
 
 Each of these was tried the other way first. The reasoning is in the source next to the
 code; this is the index.
 
-- **The dial traces the rectangular perimeter on `flint` and `emery`**, so it hugs the
-  screen on every platform. See `geometry.c`. Equal spans of time therefore cover
-  unequal arc lengths there — a corner is 1.5× further out than an edge midpoint — and
-  that distortion is accepted deliberately, because the angle is what encodes the time
-  and the angle is exact everywhere.
-- **Marker depths are pixel counts perpendicular to the boundary, never fractions of the
-  distance to it.** Scaling a depth by the radius would look like a uniform ring and be
-  wrong. But a fixed count *along the ray* is wrong too on a rectangle, and that is the
-  subtle one: the ray stops being square to the edge as it moves off an edge midpoint,
-  so a constant radial depth only presents cos(θ) of itself across the edge and a band
-  measured 1.8× thinner at a corner than at three o'clock. `depth_along_ray` in
-  `geometry.c` divides by that cosine, which is why the ray distance grows toward a
-  corner. **Every depth taken from the boundary goes through it** — bands, notches,
-  markers, the hour index's tip clearance — because correcting one and not the others
-  breaks their relationships: an uncorrected notch beside a corrected band leaves the
-  band poking out past the notch inner-ends.
+- **A left-edge strip is the old dial's nine-o'clock ray, and nothing about the helpers
+  changed.** See `track_at` in `geometry.c`. At `a = TRIG_MAX_ANGLE * 3 / 4`, `step_in`
+  moves `+x` — inward, toward the content column — and `step_side` moves `∓y` along the
+  track, so bands, markers and the pointer are drawn by exactly the same primitives that
+  drew them around a ring. One renderer covers a straight edge and `gabbro`'s arc.
+- **There is no cosine correction any more, and that is not an oversight.** The dial
+  needed `depth_along_ray` because a ray leaving a *rectangle* at an angle is not square
+  to the edge it leaves through, so a fixed depth presented only cos(θ) of itself and a
+  band measured 1.8× thinner at a corner. Both of the strip's shapes are square to their
+  own boundary — a circle's ray is its normal, and so is a vertical edge's — so a depth
+  in pixels is already perpendicular everywhere. Deleting it was the point of the shape,
+  not a regression.
+- **`gabbro`'s strip curves along the left arc; the other two are straight.** See
+  `ARC_SPAN_DEG` in `geometry.c`. 90° is tuned, not arbitrary: the arc bulges to the
+  bezel at nine o'clock and curls back in at both ends, so a wider span pushes those ends
+  rightward into the content column at exactly the clock's height and costs a whole font
+  size.
+- **The clock lines up with the pointer's *body*, not with the point of the track it
+  marks.** See `layout_compute`. Identical on a rectangle, where the ray is horizontal;
+  on the arc the ray runs down and to the right, so the wedge sits about a dozen pixels
+  below the arc point its apex touches, and a clock levelled with the apex reads as
+  floating above it.
+- **The clock is centred on its ink, not on its content box, and the correction is
+  measured rather than derived.** See `layout_compute`. A digits-and-colon subset never
+  descends below the baseline, so the box has more slack above the glyphs than below and
+  centring the box leaves them low — two pixels on `flint`. The TTF's own `hhea` metrics
+  predict the opposite sign, because what the SDK lays out to is the generated
+  resource's metrics, not the source font's.
+- **Coverage is one byte per minute, not per pixel or per degree.** See `s_cov` in
+  `strip.c`. A minute is under a pixel of track on all three displays, so quantising to
+  one is free, and 241 bytes is less than the dial's 360. Bands are then drawn one
+  stroked line per covered minute, which is the same technique the ring used per degree —
+  the samples are 0.7–0.9px apart under a 3px stroke, so they overlap into a solid band.
 - **A band's asked-for depth and its drawn depth are two different numbers.** See
-  `draw_bands` in `dial.c`. Bands are thick radial lines, and a thick line's caps run
-  `stroke/2` past each endpoint — so asking for `tick_len` drew a band deeper than the
-  notch zone it was supposed to fill, and deeper than the notches crossing it. The line
-  is shortened by exactly that at the inner end. **Measure a band off a screenshot
-  before trusting any depth constant here**; the arithmetic in the source is not what
-  reaches the display.
+  `draw_bands` in `strip.c`. A thick line's caps run `stroke/2` past each endpoint, so
+  asking for a depth drew a band that much deeper than the notch zone it was supposed to
+  fill. The outward overshoot is wanted — it pushes the band hard against the screen
+  edge — so only the inner end is shortened. **Measure a band off a screenshot before
+  trusting any depth constant here**; the arithmetic in the source is not what reaches
+  the display.
 - **Every stroke width goes through `stroke_px()`, and comes back odd.** See
   `geometry.h`. The SDK supports odd widths only — an even one is stored as asked but
   the drawing routines round it down, so a requested 4 reaches the screen as 3 and
   anything derived from the 4 is describing a line that was never drawn. Odd is also the
   only width that sits square on the pixel grid, since only an odd count puts the same
-  number of pixels either side of the centre line; that is what keeps the four quarter
-  notches — the only exactly vertical and horizontal lines on the face — centred on
-  their own rays. Line *endpoints* are rounded to the nearest pixel for the same reason:
-  `div_round()` in `geometry.c` replaces C's truncation, which biased every stepped
-  point back toward where it started by up to a pixel.
-- **An upcoming band is shallower, not lighter.** See `dial.c`. The first version
-  hatched it — a 1px radial line every other degree, a textbook half-tone — which was
-  completely wrong here, because the notches are *also* 1px radial lines and the band
-  read as nothing but a patch of extra ticks. Depth is a different shape; density is not.
-- **An upcoming point marker is hollow on `flint` and solid everywhere else.** See
-  `dial.c`. On the colour platforms amber-against-orange already says upcoming against
-  overdue, so both wedges are filled and fill is left to say "point in time, not a
-  span". `flint` folds both to black, which leaves hollow-against-solid as the only
-  urgency channel a marker has.
-- **The notch ring sits at a different depth in the stack on `flint`.** See `dial.c`.
-  On the colour platforms it is drawn last — ink over the bands and the markers both,
-  so the grid the timeline is read off stays unbroken, and neither marker halos nor
-  inverted notches are needed to separate amber from cerulean. `flint` draws the band
-  and the notches in the same ink, so there the notches invert under a running band and
-  stay *below* the markers; a cut through a solid marker would split the one shape that
-  says "overdue", and the halo is what keeps a marker off a band it shares an ink with.
-- **The hour index sits inside the ring, not in it.** See `dial.c`. Its tip stops 3px
-  short of the notch zone's inner edge and the wedge reaches inward from there, so the
-  ring stays the bands' and markers' alone. Long enough to cross whichever slot it is
-  nearest at twelve and six o'clock — the halo is what keeps both legible.
+  number of pixels either side of the centre line. Line *endpoints* are rounded to the
+  nearest pixel for the same reason: `div_round()` in `geometry.c` replaces C's
+  truncation, which biased every stepped point back toward where it started by up to a
+  pixel.
+- **Hour notches are thicker, not longer.** Length is already spoken for: it is what
+  separates a notch from a band, which fills part of the same depth.
+- **Notches sit on the wall clock's quarter hours, not at multiples of fifteen minutes
+  from the top of the window.** That is what makes the strip scroll — every notch's
+  position slides by the same fraction of a pitch each minute, and the stationary pointer
+  is what that motion is read against.
+- **An upcoming band is shallower, not lighter.** See `strip.c`. The first version
+  hatched it — a thin line every other step, a textbook half-tone — which was completely
+  wrong here, because the notches are *also* thin lines and the band read as nothing but
+  a patch of extra ticks. Depth is a different shape; density is not.
+- **Point markers are solid on every platform, including `flint`.** See `draw_markers` in
+  `strip.c`. The dial drew `flint`'s upcoming marker hollow because folding every colour
+  to black left hollow-against-solid as the only channel that could say "overdue". A
+  linear track says it by position — overdue is *above* the pointer, always — which a
+  twelve-hour ring could never do, every point on it being both past and future.
+  Dropping it also fixed a real defect: measured on `flint`, a hollow wedge at this size
+  is a 1px outline under a 3px background halo, and where it crossed a band it striped
+  the two into noise.
+- **The notches sit at a different depth in the stack on `flint`.** See `strip.c`. On the
+  colour platforms they are drawn last — ink over the bands and the markers both, so the
+  ruler the timeline is read off stays unbroken, and black over cerulean or amber costs
+  nothing to see. `flint` draws the band and the notches in the same ink, so there the
+  notches invert under a running band and stay *below* the markers; a cut through a solid
+  marker would split the one shape that says "overdue".
+- **The pointer sits inside the notch zone, not in it, and points the other way.** See
+  `strip_draw_now`. Its apex stops `POINTER_TIP_GAP` short of the zone's inner edge and
+  the wedge reaches inward from there, so the strip stays the bands' and markers' alone.
+  Markers reach *in* from the track; the pointer reaches *out* at it, which is what keeps
+  the two from being read as one another.
 - **A halo is a grown filled shape, never a wide stroked outline.** See `draw_tri` in
   `geometry.c`. A stroked path miters its corners, and the miter at a sharp vertex runs
-  *far* past the vertex — at the hour index's 42° tip a 4px stroke overshoots by more
-  than five pixels, which is enough to clear the tip's 3px gap and punch a
+  *far* past the vertex — enough to clear the pointer's tip gap and punch a
   background-coloured slot through an appointment band. Growing the vertices away from
-  the centroid instead bounds the halo at any angle. Hollow shapes still need the
-  outline form, and keep it.
-- **The hour index is drawn last, after the text.** See `dial.c`. Both slots are
-  centred, which puts them at twelve and six o'clock, and their background knockout was
+  the centroid instead bounds the halo at any angle.
+- **The pointer is drawn last, after the text.** See `proto.c`. The clock is pinned to
+  it, so the two are adjacent by construction and the clock's background knockout was
   erasing the one element every marker is measured against.
-- **The hour index is ink, not the accent colour.** It shared `GColorVividCerulean` with
-  the band and vanished whenever the current hour fell inside a running appointment.
+- **The pointer is ink, not the accent colour.** It shared `GColorVividCerulean` with the
+  band and vanished whenever now fell inside a running appointment — which is most of the
+  time it matters.
 - **Both bands use one hue.** `GColorCeleste` was too pale to see on white, and a second
   tint is redundant when depth and notch-inversion already say it.
 - **Text rows knock out their own footprint** before drawing. Cheap (the background is
   already that colour) and it is what stops a marker spiking through the countdown.
-- **Point markers merge across neighbouring notches**, not just within one. A marker's
-  base is wider than the 6° notch pitch on all three displays, so two entries six
-  minutes apart — which straddle a notch boundary about half the time — would otherwise
-  smear together.
-- **The date is `%a %d`, not `%a %d %b`.** Inside the notch ring there is not room for
-  the month at a readable size on any of the three platforms — `gabbro`'s chord at the
-  date's height is the tightest, but even `flint`'s full width minus the ring is a few
-  pixels short.
+- **Point markers sit at their exact position and merge only when they would overlap.**
+  See `build_points` in `strip.c`. The dial snapped every task to the nearest of 60
+  notches, which quantised to twelve minutes; the strip has the resolution to place them
+  properly, so the notches are a ruler rather than a bucket. Merging is decided by
+  whether two bases would smear together, which needs the points sorted along the track —
+  the event table has no order of its own, and this is the only place on the face that
+  needs one.
+- **The countdown reserves the progress bar's height whether or not it draws it.** The
+  bar only appears while an appointment is running, and a row that changed height when it
+  appeared would move the digits out from under the reader's eye at the one moment they
+  are watching them.
+- **Counting down draws no bar at all.** A bar is a thing that fills up, so its presence
+  already says the number is climbing; a second empty bar under a countdown would invite
+  reading it as a countdown bar running the other way. Its absence is the distinction.
+- **The nav row reserves no height, and that is what makes five rows fit.** Everything
+  above it is flowed down from the pointer and the warnings row is pinned to the bottom,
+  so nav lives in the slack between them and nothing moves whether it draws or not.
+- **The warnings row is at the bottom, below nav.** The dial gave the companion-down
+  alert the *first* slot on the face, on the grounds that it invalidates everything
+  phone-fed. It is last now because that was asked for; red still marks it, so it is
+  demoted in position rather than in salience.
+- **The date is `%a %d`, not `%a %d %b`.** There is not room for the month at a readable
+  size beside the strip on any of the three platforms — `gabbro`'s chord at the date's
+  height is the tightest.
 
 ## Architecture notes
 
 Single window, single layer, one update proc. Every repaint is
 `layer_mark_dirty(s_root_layer)`.
 
-**Nothing animates.** The only tick is `MINUTE_UNIT`, and it is also what advances both
-countdowns and retires whatever has aged out, because every marker's position,
-prominence and existence is a function of `now`. The previous design's flash subsystem
+**Nothing animates, and the strip "scrolls" anyway.** The only tick is `MINUTE_UNIT`.
+Scrolling is not an animation but a consequence of the mapping: every position on the
+track is `f(t - now)`, so recomputing it once a minute slides the whole ruler past a
+pointer that is pinned to a quarter of the way down. The same tick advances the countdown
+and retires whatever has aged out, because every marker's position, prominence and
+existence is a function of `now`. The previous design's flash subsystem
 and its `app_focus_service` subscription are both gone — there is nothing sub-minute
 left to pause under a modal.
 

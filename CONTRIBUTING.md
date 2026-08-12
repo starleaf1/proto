@@ -35,9 +35,10 @@ beautifully on `gabbro` can be invisible on `flint`.
 
 **Seed the calendar with `watchface/tools/send-demo-events.py`.** It packs the
 `CalEvents` blob and sends it to a running watchface, covering every marker case — a
-running band, two overlapping bands that must flatten, clustered point entries, an
-overdue reminder, and a marker sitting on top of a band. `--clear` and `--remove` drive
-the flush and delta paths.
+running band across the pointer, two overlapping bands that must flatten, two point
+entries too close to draw apart, an overdue reminder above the pointer, a marker sitting
+on top of a band, and one entry past the horizon that must not draw. `--clear` and
+`--remove` drive the flush and delta paths.
 
 `PROTO_DEMO=1 pebble build` compiles the same set in, for tooling older than
 pebble-tool 5.0.39, which is where `send-app-message --bytes` arrived. Keep
@@ -93,10 +94,10 @@ shows up as markers in the wrong place on a watch.
   on two of three platforms, so it may reinforce a distinction but never carry it
   alone.
 - **Match the surrounding code.** Follow the existing style, naming and comment
-  density in each component (`watchface/src/c/dial.c` is the reference for C).
+  density in each component (`watchface/src/c/strip.c` is the reference for C).
 - **Comment the decisions, not the code.** Several things in here look like bugs and
-  are not — the hour index drawing last, an upcoming band being shallower rather than
-  lighter, the dial being a circle on a rectangular screen. Each has a note saying what
+  are not — the pointer drawing last, an upcoming band being shallower rather than
+  lighter, the strip curving on `gabbro` and running straight elsewhere. Each has a note saying what
   was tried and why it failed. Keep that up.
 - **Don't commit build output.** `watchface/build/`, `*.pbw` and Android/Gradle
   artifacts are gitignored and regenerable.

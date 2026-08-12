@@ -1,10 +1,12 @@
 ## Project Overview
 
 **proto** is a monorepo for a Pebble watchface and its phone-side companion. The
-watchface uses a twelve-hour dial as a six-hour timeline: appointments are arcs
-spanning their duration at their real clock position, tasks and reminders are
-triangles at the nearest notch. Two single-line slots inside the ring alert and count
-down. The calendar is pushed to the watch by an Android companion over Bluetooth.
+watchface reads the left edge of the display as a four-hour timeline running downward —
+one hour behind, three ahead, and a pointer at the quarter mark that never moves.
+Appointments are bands spanning their duration, tasks and reminders are wedges poking
+inward off the ruler. A digital clock sits level with the pointer, and the date, a
+countdown, the next turn and whatever is running out stack beneath it. The calendar is
+pushed to the watch by an Android companion over Bluetooth.
 
 ## Repository Layout
 
@@ -32,11 +34,11 @@ The 2026 devices only: **`flint`** (Pebble 2 Duo, 144×168, black and white),
 colour, round).
 
 That `flint` has a single ink is a design constraint, not a footnote. Every distinction
-on the face is carried by shape or depth first — a running band fills the notch zone
-while an upcoming one fills half of it, an overdue marker is solid where an upcoming one
-is hollow — and colour is layered on top only where there is any. **Verify visual
-changes on `flint` as well as a colour platform**; something that reads well on
-`gabbro` can be invisible on `flint`.
+on the face is carried by shape, depth or position first — a running band fills the notch
+zone while an upcoming one fills half of it, and an overdue marker is simply *above* the
+pointer — and colour is layered on top only where there is any. **Verify visual changes
+on `flint` as well as a colour platform**; something that reads well on `gabbro` can be
+invisible on `flint`.
 
 ## The one contract that ties the components together
 
@@ -56,19 +58,23 @@ Before changing message keys, the UUID, the blob layout, or AppMessage buffer si
 read [docs/protocol.md](docs/protocol.md) — both components must move together, in one
 commit.
 
-## Two things that look like bugs and are not
+## Three things that look like bugs and are not
 
-- **The dial traces the rectangular perimeter on `flint` and `emery`,** so equal spans
-  of time cover unequal arc lengths there. Accepted deliberately: the angle encodes the
-  time and the angle is exact. What may never vary is how *thick* a marker looks —
-  depths are pixel counts measured perpendicular to the boundary, never fractions of the
-  distance to it. On a rectangle that means the distance travelled along the ray is
-  divided by the cosine of its angle to the edge normal, so it stretches toward a
-  corner; the radial extent varies precisely so that the visible thickness does not.
+- **The strip is straight on `flint` and `emery` and curved on `gabbro`,** following the
+  left arc there rather than a chord inset from it. One renderer covers both: every point
+  on the track carries a position *and* a ray angle, which is a constant 270° on a
+  rectangle and sweeps on the arc. What may never vary is how *thick* a marker looks, and
+  here it cannot — depths are pixel counts perpendicular to the boundary, and both shapes
+  are square to their own boundary, so no correction is needed. The dial this replaced
+  did need one, and its absence is the shape paying for itself rather than a regression.
+- **Nothing animates, yet the strip scrolls.** There is one `MINUTE_UNIT` tick and no
+  animation anywhere. Every position on the track is a function of `t - now`, so
+  recomputing the face once a minute slides the whole ruler past a pointer that is pinned
+  to a quarter of the way down.
 - **The watch keeps drawing calendar markers when the companion is unreachable.** An
   entry is timestamped and ages out on its own, unlike the notification counts this face
-  used to carry, and the top slot's first priority is already saying the companion is
-  gone. Uncertainty is stated, not silently omitted.
+  used to carry, and the bottom row is already saying the companion is gone. Uncertainty
+  is stated, not silently omitted.
 
 ## Documentation
 

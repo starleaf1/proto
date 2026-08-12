@@ -65,7 +65,7 @@ record   u32 id   i32 startEpochS   u16 durMin   u8 kind   u8 op
 | --- | --- |
 | `id` | Stable key for one **instance**. A weekly meeting is one event row and many instances; keying on the event id alone would make each occurrence overwrite the last. Must be stable across scans *and* across process restarts, since it is the identity the watch removes entries by. `CalendarSource` mixes `(eventId, startMinute)` with FNV-1a rather than using `hashCode`, whose contract does not promise stability between runs. |
 | `startEpochS` | **Absolute UTC seconds.** Pebble takes its clock from the phone, and absolute timestamps avoid a whole class of bug that "minutes from now" invites — a reference instant that has already moved by the time the watch decodes it. |
-| `durMin` | Minutes. **`0` means a point in time**: a task or reminder, which the watch draws as a triangle rather than a band. Clamped to `0`–`65535`, never wrapped. |
+| `durMin` | Minutes. **`0` means a point in time**: a task or reminder, which the watch draws as a wedge rather than a band. Clamped to `0`–`65535`, never wrapped. |
 | `kind` | `0` appointment, `1` task. Carried separately from `durMin` on purpose — see *Tasks* below. |
 | `op` | `0` upsert, `1` remove. |
 
@@ -101,7 +101,7 @@ knowing:
 
 - `CalendarContract` gives `STATUS_CANCELED`, which covers "appointment cancelled",
   but has no notion of completion. **A task ticked off is not observable.** Its
-  marker ages out via the watch's two-hour linger instead of disappearing at once.
+  marker ages out via the watch's linger instead of disappearing at once.
 - `kind` is on the wire independently of `durMin` precisely so a local provider that
   *does* expose completion (OpenTasks / Tasks.org, `org.dmfs.tasks`) can be added
   later as a companion-only change — no protocol change, no watchface change.
@@ -109,7 +109,7 @@ knowing:
 Google Tasks cannot fill this gap: its on-device data is not reachable by third-party
 apps, and its REST API documents `due` as *"Only date information is recorded; the
 time portion of the timestamp is discarded"*, so every Google task arrives as a bare
-date — exactly the whole-day case the dial is specified to ignore.
+date — exactly the whole-day case the watch is specified to ignore.
 
 ## Navigation
 
@@ -133,7 +133,7 @@ characters, and `0.3 MI` needs the fraction while `250 M` does not; sending tent
 lets the watch decide which to render. It shows the tenth below ten units and drops it
 above.
 
-The watch expires the nav slot on its own after **2 minutes** without an update,
+The watch expires the nav row on its own after **2 minutes** without an update,
 independently of the liveness watchdog below. A turn instruction is the one thing here
 that lies loudly when it goes stale — a phantom "right in 250 m" is worse than no
 instruction — and the general watchdog is far too slow to catch it.
@@ -159,7 +159,7 @@ and the watch applies the ≤ 30% threshold itself.
 
 ## Liveness
 
-The watch's top slot has one job above all others: say so when it cannot vouch for
+The watch's bottom row has one job above all others: say so when it cannot vouch for
 anything phone-fed. Two independent failures, learned two different ways.
 
 - **Bluetooth loss — the watch detects it alone.** `connection_service_subscribe`
@@ -235,7 +235,7 @@ The previous design hid its phone-fed icons whenever certainty was lost. This on
 not, because calendar entries are not counts:
 
 - **Calendar markers and the countdown stay on screen.** An entry is timestamped and
-  ages out on its own, so it does not go stale the way a count does — and the top slot
+  ages out on its own, so it does not go stale the way a count does — and the bottom row
   is already saying the companion is unreachable, so nothing is claiming to be
   complete.
 - **Navigation is dropped** on either failure. A stale turn is the one genuinely

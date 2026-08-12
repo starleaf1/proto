@@ -1,11 +1,12 @@
 #pragma once
 #include <pebble.h>
+#include "geometry.h"
 
 // ---------------------------------------------------------------------------
 // The calendar entries the companion has told us about.
 //
 // A fixed table, no allocation: the companion caps a sync at what fits, and the
-// dial can only usefully render a couple of dozen markers anyway. The watch
+// strip can only usefully render a couple of dozen markers anyway. The watch
 // persists nothing across launches — the companion re-flushes on every connect.
 // ---------------------------------------------------------------------------
 
@@ -21,13 +22,15 @@ typedef struct {
   bool     used;
 } Event;
 
-// The dial's live window. 6 h forward plus 2 h of linger is 8 h of a 12-hour
-// dial, which is what makes absolute clock positions unambiguous — a marker can
-// never be mistaken for one half a revolution away.
-#define WINDOW_AHEAD_S  (6 * 60 * 60)
-#define WINDOW_BACK_S   (2 * 60 * 60)
+// How long an entry stays worth holding once it is past.
+//
+// A point entry lingers exactly as far back as the strip reaches, and that is not
+// cosmetic: events_gc() only collects entries that are both past *and* invisible, so
+// a linger longer than the window would keep rows alive that can never be drawn
+// again. The strip's own extent is in geometry.h — STRIP_BACK_S and STRIP_AHEAD_S —
+// because the track is what defines what "visible" means.
 #define LONG_LINGER_S   (5 * 60)
-#define SHORT_LINGER_S  (2 * 60 * 60)
+#define SHORT_LINGER_S  STRIP_BACK_S
 
 void events_clear(void);
 void events_upsert(uint32_t id, time_t start, uint16_t dur_min, uint8_t kind);

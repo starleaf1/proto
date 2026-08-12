@@ -1,7 +1,10 @@
 #include "events.h"
 
 #define SLOT_NEAR_S  (30 * 60)
-#define SLOT_FAR_S   (3 * 60 * 60)
+
+// The far tier reaches exactly as far as the strip does, deliberately: the
+// countdown should never name something the reader cannot also see a marker for.
+#define SLOT_FAR_S   STRIP_AHEAD_S
 
 static Event s_events[EVENTS_MAX];
 
@@ -51,7 +54,7 @@ void events_remove(uint32_t id) {
 
 bool event_visible(const Event *e, time_t now) {
   if (!e->used) return false;
-  if (e->start > now + WINDOW_AHEAD_S) return false;       // beyond the horizon
+  if (e->start > now + STRIP_AHEAD_S) return false;        // below the strip, for now
   if (event_is_long(e)) return now <= event_end(e) + LONG_LINGER_S;
   return now <= e->start + SHORT_LINGER_S;
 }
@@ -64,8 +67,8 @@ bool event_prominent(const Event *e, time_t now) {
 void events_gc(time_t now) {
   for (int i = 0; i < EVENTS_MAX; i++) {
     Event *e = &s_events[i];
-    // Only past entries are collectable. A future one that is merely beyond the
-    // 6 h horizon is not dead — it becomes visible as the window slides.
+    // Only past entries are collectable. A future one that is merely below the
+    // strip is not dead — it scrolls into view as the window slides.
     if (e->used && e->start <= now && !event_visible(e, now)) e->used = false;
   }
 }

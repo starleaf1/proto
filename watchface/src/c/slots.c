@@ -6,18 +6,20 @@
 #include <stdio.h>
 
 // ---------------------------------------------------------------------------
-// Both slots share one grammar: [glyph] number suffix, centred as a pair.
+// The three conditional rows under the clock share one grammar:
+// [glyph] number suffix, centred as a pair.
 //
-// The bottom slot's task glyph is deliberately a miniature of the dial's point
+// The countdown's task glyph is deliberately a miniature of the strip's point
 // marker, so the face teaches that half of its vocabulary once instead of twice.
 // The appointment glyph used to work the same way — a short bar, a band unrolled
 // — and it did not survive contact: a rounded bar at slot size reads as a pill or
 // a battery, not as anything to do with a calendar. It is Material Design's
-// calendar mark now. The echo of the dial was worth less than being recognised.
+// calendar mark now. The echo of the strip was worth less than being recognised.
 //
-// What did carry over is the progress reading: the running-appointment form fills
-// the calendar's open half from the left, so the same ink still says how far in
-// you are.
+// The progress reading that used to live *inside* that glyph is now a bar under
+// the digits instead. It is what tells a count-up from a count-down, and it has
+// to work on a display with one ink, where the calendar mark's own fill could
+// only be read by comparing it against a calendar mark that was not there.
 //
 // Every glyph is drawn from primitives or a normalised point table rather than a
 // bitmap. Three platforms means three sizes, and vectors stay crisp at all of
@@ -184,10 +186,11 @@ static void glyph_battery(GContext *ctx, GRect box, GColor ink) {
 // date grid inside the real thing is illegible at twenty pixels — flint's glyph is
 // about that.
 //
-// `progress` fills the open half from the left to `pct`. The in-progress form still
-// has to say how far into the appointment you are, and the area under the header is
-// exactly the rectangle that was already doing it.
-static void glyph_calendar(GContext *ctx, GRect box, bool progress, int pct, GColor ink) {
+// One form, not two. The running-appointment version used to fill this glyph's open
+// half to say how far through you were, which asked the reader to compare it against
+// an unfilled calendar mark that was nowhere on the screen. The bar under the digits
+// says it instead, and says it against its own empty track.
+static void glyph_calendar(GContext *ctx, GRect box, GColor ink) {
   GPoint c = grect_center_point(&box);
   int16_t side = box.size.w < box.size.h ? box.size.w : box.size.h;
 
@@ -220,40 +223,57 @@ static void glyph_calendar(GContext *ctx, GRect box, bool progress, int pct, GCo
   graphics_fill_rect(ctx, GRect(body.origin.x, body.origin.y, w, head_h),
                      0, GCornerNone);
   graphics_draw_rect(ctx, body);
+}
 
-  if (!progress) return;
+// A task: the strip's point marker, shrunk. It points the way the marker points —
+// inward, off the ruler — which on the strip is to the right rather than toward
+// the centre of a dial.
+static void glyph_task(GContext *ctx, GRect box, GColor ink) {
+  GPoint c = grect_center_point(&box);
+  int16_t side = box.size.w < box.size.h ? box.size.w : box.size.h;
+  int16_t hw = side * 40 / 100;
+  int16_t hh = side * 35 / 100;
+  draw_tri(ctx, GPoint(c.x + hw, c.y),
+           GPoint(c.x - hw, c.y - hh), GPoint(c.x - hw, c.y + hh),
+           ink, true, 1, false);
+}
+
+// The count-up cue, and the only thing that distinguishes the two directions.
+//
+// A hairline track with a solid fill over it, rather than a fill alone: the
+// unfilled part has to be visible for the filled part to mean anything, and on
+// flint they are the same black. Weight is the channel, not colour — the same
+// device the hollow-against-solid marker uses on that display.
+//
+// Counting *down* draws no bar at all. That asymmetry is the point: a bar is a
+// thing that fills up, so its presence already says the number is climbing, and a
+// second empty bar under a countdown would only invite reading it as a countdown
+// bar running the other way.
+static void draw_progress(GContext *ctx, GRect box, int pct, GColor ink) {
+  if (box.size.w <= 0 || box.size.h <= 0) return;
   if (pct < 0) pct = 0;
   if (pct > 100) pct = 100;
-  GRect open = GRect(body.origin.x + sw, body.origin.y + head_h,
-                     w - 2 * sw, h - head_h - sw);
-  int16_t fill_w = open.size.w * pct / 100;
-  if (fill_w > 0 && open.size.h > 0) {
-    graphics_fill_rect(ctx, GRect(open.origin.x, open.origin.y, fill_w, open.size.h),
+
+  graphics_context_set_fill_color(ctx, ink);
+  graphics_fill_rect(ctx, GRect(box.origin.x, box.origin.y + box.size.h / 2,
+                                box.size.w, 1), 0, GCornerNone);
+  int16_t fw = (int16_t)((int32_t)box.size.w * pct / 100);
+  if (fw > 0) {
+    graphics_fill_rect(ctx, GRect(box.origin.x, box.origin.y, fw, box.size.h),
                        0, GCornerNone);
   }
 }
 
-// A task: the dial's point marker, shrunk.
-static void glyph_task(GContext *ctx, GRect box, GColor ink) {
-  GPoint c = grect_center_point(&box);
-  int16_t side = box.size.w < box.size.h ? box.size.w : box.size.h;
-  int16_t hw = side * 35 / 100;
-  int16_t hh = side * 40 / 100;
-  draw_tri(ctx, GPoint(c.x, c.y - hh),
-           GPoint(c.x - hw, c.y + hh), GPoint(c.x + hw, c.y + hh),
-           ink, true, 1, false);
-}
-
 // ---------------------------------------------------------------------------
-// Slot layout
+// Row layout
 // ---------------------------------------------------------------------------
 
 // Places a glyph and its text as one centred group. The glyph is square and
-// three-quarters of the slot's height, which lines its optical centre up with
-// the text's without having to know the font's internal padding.
+// most of the row's height, which lines its optical centre up with the text's
+// without having to know the font's internal padding.
 static void slot_layout(GRect box, GFont font, const char *text,
                         GRect *glyph_box, GRect *text_box) {
-  // 85% of the slot's height, not all of it: the box carries the font's ascender
+  // 85% of the row's height, not all of it: the box carries the font's ascender
   // and descender, and a glyph matched to the cap height reads as the same size
   // as the digits beside it.
   int16_t side = box.size.h * 85 / 100;
@@ -271,12 +291,12 @@ static void slot_layout(GRect box, GFont font, const char *text,
   *text_box = GRect(x + side + gap, box.origin.y, ts.w + 4, box.size.h);
 }
 
-// Clear the pair's footprint before drawing into it, for the same reason the
-// numeral and date do: both slots sit at twelve and six o'clock, which is exactly
-// where a marker at the top or bottom of the dial points inward.
-// Kept to the glyph's vertical band rather than the slot box's full height: the
-// box carries padding, and clearing all of it takes a bite out of the notches at
-// six o'clock that sit just past the slot's lower edge.
+// Clear the pair's footprint before drawing into it, for the same reason the clock
+// and the date do: a marker deep enough to reach this far in stops at the text
+// instead of crossing it.
+// Kept to the glyph's vertical band rather than the row box's full height: the box
+// carries padding, and clearing all of it takes a bite out of whatever notch sits
+// just past the row's edge.
 static void slot_knock_out(GContext *ctx, GRect glyph_box, GRect text_box) {
   int16_t x0 = glyph_box.origin.x - 2;
   int16_t x1 = text_box.size.w > 4 ? text_box.origin.x + text_box.size.w
@@ -294,18 +314,83 @@ static void fmt_distance(char *buf, size_t n, int tenths, int unit) {
   else snprintf(buf, n, "%d %s", tenths / 10, u);
 }
 
-void slots_draw_top(GContext *ctx, const Layout *lo, GFont font) {
+// ---------------------------------------------------------------------------
+// The rows
+// ---------------------------------------------------------------------------
+
+void slots_draw_count(GContext *ctx, const Layout *lo, GFont font, time_t now) {
+  // Calendar markers and this countdown stay on show even when the companion is
+  // gone, unlike the notification counts this face used to carry. An entry is
+  // timestamped and ages out on its own, so it does not go stale the way a count
+  // does — and the warnings row is already saying the companion is unreachable, so
+  // nothing here is claiming to be complete.
+  SlotPick p = events_pick_slot(now);
+  if (!p.valid) return;
+
+  int32_t mins = p.seconds / 60;
+  if (mins > 99 * 60 + 59) mins = 99 * 60 + 59;
+  char text[12];
+  snprintf(text, sizeof text, "%02d:%02d", (int)(mins / 60), (int)(mins % 60));
+
+  GColor ink = COL_INK;
+  if (p.counting_up) ink = COL_ACCENT;
+  else if (p.kind == EV_TASK) ink = COL_TASK_SOON;
+
+  // The digits sit in the row above the bar's reserved strip, so they hold still
+  // whichever direction the count is running.
+  GRect row = lo->count_box;
+  row.size.h -= PROGRESS_GAP + lo->bar_h;
+
+  GRect gbox, tbox;
+  slot_layout(row, font, text, &gbox, &tbox);
+  slot_knock_out(ctx, gbox, tbox);
+
+  if (p.kind == EV_TASK && !p.counting_up) glyph_task(ctx, gbox, ink);
+  else glyph_calendar(ctx, gbox, ink);
+
+  graphics_context_set_text_color(ctx, ink);
+  graphics_draw_text(ctx, text, font, tbox, GTextOverflowModeFill,
+                     GTextAlignmentLeft, NULL);
+
+  if (p.counting_up) {
+    GRect bar = GRect(tbox.origin.x,
+                      lo->count_box.origin.y + lo->count_box.size.h - lo->bar_h,
+                      tbox.size.w - 4, lo->bar_h);
+    knock_out(ctx, bar);
+    draw_progress(ctx, bar, p.pct, ink);
+  }
+}
+
+void slots_draw_nav(GContext *ctx, const Layout *lo, GFont font) {
+  if (!wire_nav_active()) return;
+
+  char text[16] = "";
+  fmt_distance(text, sizeof text, wire_nav_distance(), wire_nav_unit());
+
+  GRect gbox, tbox;
+  slot_layout(lo->nav_box, font, text, &gbox, &tbox);
+  slot_knock_out(ctx, gbox, tbox);
+
+  glyph_maneuver(ctx, gbox, wire_nav_maneuver(), COL_INK);
+  graphics_context_set_text_color(ctx, COL_INK);
+  graphics_draw_text(ctx, text, font, tbox, GTextOverflowModeFill,
+                     GTextAlignmentLeft, NULL);
+}
+
+// The bottom row: what the watch cannot vouch for, and what is about to run out.
+//
+// Strict priority — the first thing that is true is the only thing shown. A low
+// phone battery therefore suppresses the watch's own warning, which is deliberate:
+// one row, one thing, and the phone is the half of the system that this face
+// depends on and cannot see for itself.
+void slots_draw_warn(GContext *ctx, const Layout *lo, GFont font) {
   char text[16] = "";
   GColor ink = COL_INK;
-  enum { T_NONE, T_DOWN, T_NAV, T_PHONE, T_WATCH } which = T_NONE;
+  enum { T_NONE, T_DOWN, T_PHONE, T_WATCH } which = T_NONE;
 
-  // Strict priority: the first thing that is true is the only thing shown.
   if (!wire_companion_alive()) {
     which = T_DOWN;
     ink = COL_ALERT;
-  } else if (wire_nav_active()) {
-    which = T_NAV;
-    fmt_distance(text, sizeof text, wire_nav_distance(), wire_nav_unit());
   } else {
     int pb = wire_phone_battery();
     int wh = wbatt_hours();
@@ -322,12 +407,11 @@ void slots_draw_top(GContext *ctx, const Layout *lo, GFont font) {
   if (which == T_NONE) return;
 
   GRect gbox, tbox;
-  slot_layout(lo->top_box, font, text, &gbox, &tbox);
+  slot_layout(lo->warn_box, font, text, &gbox, &tbox);
   slot_knock_out(ctx, gbox, tbox);
 
   switch (which) {
     case T_DOWN:  glyph_phone(ctx, gbox, true, ink); break;
-    case T_NAV:   glyph_maneuver(ctx, gbox, wire_nav_maneuver(), ink); break;
     case T_PHONE: glyph_phone(ctx, gbox, false, ink); break;
     case T_WATCH: glyph_battery(ctx, gbox, ink); break;
     default: break;
@@ -337,39 +421,4 @@ void slots_draw_top(GContext *ctx, const Layout *lo, GFont font) {
     graphics_draw_text(ctx, text, font, tbox, GTextOverflowModeFill,
                        GTextAlignmentLeft, NULL);
   }
-}
-
-void slots_draw_bottom(GContext *ctx, const Layout *lo, GFont font, time_t now) {
-  // Calendar markers and this countdown stay on show even when the companion is
-  // gone, unlike the notification counts this face used to carry. An entry is
-  // timestamped and ages out on its own, so it does not go stale the way a count
-  // does — and the top slot is already saying the companion is unreachable, so
-  // nothing here is claiming to be complete.
-  SlotPick p = events_pick_slot(now);
-  if (!p.valid) return;
-
-  int32_t mins = p.seconds / 60;
-  if (mins > 99 * 60 + 59) mins = 99 * 60 + 59;
-  char text[12];
-  snprintf(text, sizeof text, "%02d:%02d", (int)(mins / 60), (int)(mins % 60));
-
-  GColor ink = COL_INK;
-  if (p.counting_up) ink = COL_ACCENT;
-  else if (p.kind == EV_TASK) ink = COL_TASK_SOON;
-
-  GRect gbox, tbox;
-  slot_layout(lo->bottom_box, font, text, &gbox, &tbox);
-  slot_knock_out(ctx, gbox, tbox);
-
-  if (p.counting_up) {
-    glyph_calendar(ctx, gbox, true, p.pct, ink);
-  } else if (p.kind == EV_TASK) {
-    glyph_task(ctx, gbox, ink);
-  } else {
-    glyph_calendar(ctx, gbox, false, 0, ink);
-  }
-
-  graphics_context_set_text_color(ctx, ink);
-  graphics_draw_text(ctx, text, font, tbox, GTextOverflowModeFill,
-                     GTextAlignmentLeft, NULL);
 }

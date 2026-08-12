@@ -33,43 +33,43 @@
       "media": [
         {
           "type": "font",
+          "name": "NUM_28",
+          "file": "fonts/orbitron.ttf",
+          "characterRegex": "[0-9:]",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "font",
+          "name": "DATE_20",
+          "file": "fonts/rajdhani_semibold.ttf",
+          "characterRegex": "[A-Z0-9 ]",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "font",
+          "name": "SLOT_16",
+          "file": "fonts/rajdhani_semibold.ttf",
+          "characterRegex": "[A-Z0-9 :%.]",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "font",
           "name": "NUM_40",
           "file": "fonts/orbitron.ttf",
-          "characterRegex": "[0-9]",
-          "targetPlatforms": [
-            "flint"
-          ]
-        },
-        {
-          "type": "font",
-          "name": "DATE_22",
-          "file": "fonts/rajdhani_semibold.ttf",
-          "characterRegex": "[A-Z0-9 ]",
-          "targetPlatforms": [
-            "flint"
-          ]
-        },
-        {
-          "type": "font",
-          "name": "SLOT_18",
-          "file": "fonts/rajdhani_semibold.ttf",
-          "characterRegex": "[A-Z0-9 :%.]",
-          "targetPlatforms": [
-            "flint"
-          ]
-        },
-        {
-          "type": "font",
-          "name": "NUM_58",
-          "file": "fonts/orbitron.ttf",
-          "characterRegex": "[0-9]",
+          "characterRegex": "[0-9:]",
           "targetPlatforms": [
             "emery"
           ]
         },
         {
           "type": "font",
-          "name": "DATE_30",
+          "name": "DATE_28",
           "file": "fonts/rajdhani_semibold.ttf",
           "characterRegex": "[A-Z0-9 ]",
           "targetPlatforms": [
@@ -78,36 +78,28 @@
         },
         {
           "type": "font",
-          "name": "SLOT_24",
+          "name": "SLOT_22",
           "file": "fonts/rajdhani_semibold.ttf",
           "characterRegex": "[A-Z0-9 :%.]",
           "targetPlatforms": [
-            "emery"
+            "emery",
+            "gabbro"
           ]
         },
         {
           "type": "font",
-          "name": "NUM_76",
+          "name": "NUM_36",
           "file": "fonts/orbitron.ttf",
-          "characterRegex": "[0-9]",
+          "characterRegex": "[0-9:]",
           "targetPlatforms": [
             "gabbro"
           ]
         },
         {
           "type": "font",
-          "name": "DATE_38",
+          "name": "DATE_26",
           "file": "fonts/rajdhani_semibold.ttf",
           "characterRegex": "[A-Z0-9 ]",
-          "targetPlatforms": [
-            "gabbro"
-          ]
-        },
-        {
-          "type": "font",
-          "name": "SLOT_30",
-          "file": "fonts/rajdhani_semibold.ttf",
-          "characterRegex": "[A-Z0-9 :%.]",
           "targetPlatforms": [
             "gabbro"
           ]
