@@ -42,13 +42,20 @@ typedef struct {
   int8_t dir[2];
 } ManeuverPath;
 
-// The tables fill the grid, and the head is deliberately large relative to the
-// shaft. A 21px glyph on flint leaves only two pixels of stroke, and a head that
-// is merely a little wider than its own shaft disappears at that size — the first
-// attempt drew a recognisable "turn right" that read as the letter Γ.
+// The tables fill the grid, and the head is larger relative to the shaft than an arrow
+// drawn at any comfortable size would be. A head merely a little wider than its own
+// shaft disappears here — the first attempt drew a recognisable "turn right" that read
+// as the letter Γ.
+//
+// It used to be larger still, 32 long by 20 half-wide, and that was tuned against a
+// shaft that turned out to be one pixel — see glyph_stroke. Against the three pixels
+// the shaft is now, a head two thirds of the grid across swallowed the shaft whole and
+// the glyph came off emery as a solid lump with no direction in it at all. These
+// numbers keep the head about three times the shaft's width, which is the ratio that
+// makes it read as a head, and no more.
 #define GRID 36
-#define HEAD_LEN  32
-#define HEAD_HALF 20
+#define HEAD_LEN  26
+#define HEAD_HALF 14
 
 static const ManeuverPath MANEUVERS[] = {
   /* NAV_STRAIGHT     */ { 2, {{0,30},{0,-4}},                        {  0,-10} },
@@ -65,8 +72,25 @@ static const ManeuverPath MANEUVERS[] = {
 // the maneuver shafts, the phone's outline, the battery's rect — and an even width puts
 // each of those straight edges half a pixel off the grid on top of being quietly
 // narrowed by the renderer. See geometry.h.
+//
+// The divisor sets the stroke's ratio to the glyph; the floor is what makes the glyph
+// exist at all. A slot glyph is `slot_h * 85/100` — 17 px on flint, about 22 on emery
+// and 25 on gabbro — so the divisor of nine this used to carry landed stroke_px() on 1
+// for every one of them, on every display. Measured on emery, which is not even the
+// small one: a sharp-left maneuver whose shaft is a single pixel under a filled head
+// reads as a blob with a whisker, and the phone silhouette reads as an empty box.
+//
+// Three, because stroke_px() yields only odd widths and there is nothing between a
+// hairline and three. Below 16 px of glyph even three would start closing the shape up,
+// so the floor lifts only where there is room for it.
+static int16_t glyph_stroke(int16_t side, int16_t div) {
+  int16_t w = stroke_px(side / div);
+  if (w < 3 && side >= 16) w = 3;
+  return w;
+}
+
 static int16_t sw_for(int16_t side) {
-  return stroke_px(side / 9);
+  return glyph_stroke(side, 6);
 }
 
 static GPoint grid_pt(GPoint c, int16_t side, int gx, int gy) {
@@ -137,7 +161,7 @@ static void glyph_phone(GContext *ctx, GRect box, bool slashed, GColor ink) {
   int16_t side = box.size.w < box.size.h ? box.size.w : box.size.h;
   int16_t w = side * 58 / 100;
   int16_t h = side * 92 / 100;
-  int16_t sw = stroke_px(side / 12);
+  int16_t sw = glyph_stroke(side, 8);
 
   GRect body = GRect(c.x - w / 2, c.y - h / 2, w, h);
   graphics_context_set_stroke_color(ctx, ink);
@@ -161,6 +185,12 @@ static void glyph_phone(GContext *ctx, GRect box, bool slashed, GColor ink) {
 // The classic cell pictogram, outline only: the slot's text carries the value,
 // and a proportional fill would be claiming a percentage when what is shown is
 // hours.
+//
+// This one keeps the hairline the maneuvers and the phone gave up — see glyph_stroke.
+// A cell is half the height of the glyph box, eight pixels of it on flint, so the 3 px
+// floor would leave two pixels of interior and the outline would read as a solid slab.
+// The nub is what makes this a battery and not a rectangle, and the nub survives at
+// one pixel.
 static void glyph_battery(GContext *ctx, GRect box, GColor ink) {
   GPoint c = grect_center_point(&box);
   int16_t side = box.size.w < box.size.h ? box.size.w : box.size.h;
@@ -190,6 +220,10 @@ static void glyph_battery(GContext *ctx, GRect box, GColor ink) {
 // half to say how far through you were, which asked the reader to compare it against
 // an unfilled calendar mark that was nowhere on the screen. The bar under the digits
 // says it instead, and says it against its own empty track.
+//
+// Hairline outline here too, for the battery's reason — this shape is mostly interior,
+// and it is the open lower half against the filled header band that makes it read as a
+// calendar. Three pixels of stroke closes the half that has to stay open.
 static void glyph_calendar(GContext *ctx, GRect box, GColor ink) {
   GPoint c = grect_center_point(&box);
   int16_t side = box.size.w < box.size.h ? box.size.w : box.size.h;
@@ -254,11 +288,19 @@ static void draw_progress(GContext *ctx, GRect box, int pct, GColor ink) {
   if (pct < 0) pct = 0;
   if (pct > 100) pct = 100;
 
-  graphics_context_set_fill_color(ctx, ink);
-  graphics_fill_rect(ctx, GRect(box.origin.x, box.origin.y + box.size.h / 2,
-                                box.size.w, 1), 0, GCornerNone);
+  // The empty track is an outlined rectangle at the bar's full height, not the centre
+  // hairline it used to be. A hairline does state where 100% is, and that is all it
+  // states: at a fifth of the way through, the bar came off the display as a dash with
+  // a dot on its left end and the two did not read as one object. An outline gives the
+  // fill a container, which is what a proportion has to be read against — and it is
+  // still weight rather than colour doing the work, so flint keeps the distinction.
+  graphics_context_set_stroke_color(ctx, ink);
+  graphics_context_set_stroke_width(ctx, 1);
+  graphics_draw_rect(ctx, box);
+
   int16_t fw = (int16_t)((int32_t)box.size.w * pct / 100);
   if (fw > 0) {
+    graphics_context_set_fill_color(ctx, ink);
     graphics_fill_rect(ctx, GRect(box.origin.x, box.origin.y, fw, box.size.h),
                        0, GCornerNone);
   }
@@ -336,9 +378,12 @@ void slots_draw_count(GContext *ctx, const Layout *lo, GFont font, time_t now) {
   char text[12];
   snprintf(text, sizeof text, "%02d:%02d", (int)(mins / 60), (int)(mins % 60));
 
+  // COL_WARN, not COL_TASK_SOON. The strip's marker for this same entry is amber and
+  // stays amber — it is a solid triangle and carries 1.9:1 fine — but these are digits,
+  // and digits at slot size need the darker end of the same warm family. See theme.h.
   GColor ink = COL_INK;
   if (p.counting_up) ink = COL_ACCENT;
-  else if (p.kind == EV_TASK) ink = COL_TASK_SOON;
+  else if (p.kind == EV_TASK) ink = COL_WARN;
 
   // The digits sit in the row above the bar's reserved strip, so they hold still
   // whichever direction the count is running.

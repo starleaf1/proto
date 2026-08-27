@@ -20,9 +20,20 @@
 #define COL_INK         GColorBlack
 
 // The clock, and the countdown's progress bar.
-#define COL_ACCENT      PBL_IF_COLOR_ELSE(GColorVividCerulean, GColorBlack)
+//
+// Cobalt rather than the cerulean this used to be, for two reasons that turned out to
+// be the same reason. Measured against COL_BG, GColorVividCerulean is 2.6:1 — fine for
+// a ten-pixel band of solid fill, and not fine for the countdown's digits at slot size,
+// which is the other thing this ink draws. GColorCobaltBlue is the same hue two steps
+// down the ramp and 5.0:1, which clears the threshold for text.
+//
+// The second reason is that COL_ACCENT and COL_BAND were the *same* colour, so the one
+// element the face exists to show shared an ink with the strip's decoration and the eye
+// grouped them. Separating the two is what the contrast fix buys on top of legibility.
+#define COL_ACCENT      PBL_IF_COLOR_ELSE(GColorCobaltBlue, GColorBlack)
 
-// Appointment bands — one hue for both states.
+// Appointment bands — one hue for both states, and no longer the clock's hue either;
+// see COL_ACCENT.
 //
 // The first pass gave "upcoming" its own pale tint, which failed twice over:
 // GColorCeleste measures far too light to see on white, and any second tint is
@@ -57,11 +68,18 @@
 
 // The warnings row. Red for the companion being gone — the only *state* on this face
 // that should ever alarm you; it is shared now with the "now" rule above, which is not a
-// state at all. GColorGreen/GColorYellow stay unused:
-// on white they measure 1.4:1 and 1.1:1, so a free-floating shape in either is
-// invisible. The darker Chrome/Orange pair is what unoutlined shapes get.
+// state at all. GColorGreen/GColorYellow stay unused: on white they measure 1.4:1 and
+// 1.1:1, so a free-floating shape in either is invisible.
+//
+// COL_WARN is Windsor tan and not the Chrome yellow it was, because this row is *text*.
+// The rejection of green and yellow above was measured and right, and it stopped one
+// step short: Chrome yellow is 1.9:1, which a solid triangle on the strip survives and
+// two glyphs of "28%" beside a battery outline do not. Windsor tan is the same warm
+// family at 4.1:1. The rule the palette now follows is that an ink drawing text needs
+// 4.5:1 and an ink drawing a large solid shape can live near 2.5:1 — which is why
+// COL_BAND and COL_TASK_SOON keep their brighter tints and this one does not.
 #define COL_ALERT       PBL_IF_COLOR_ELSE(GColorRed, GColorBlack)
-#define COL_WARN        PBL_IF_COLOR_ELSE(GColorChromeYellow, GColorBlack)
+#define COL_WARN        PBL_IF_COLOR_ELSE(GColorWindsorTan, GColorBlack)
 
 // Four sizes per platform rather than one set scaled by the SDK, because Pebble fonts
 // are fixed-pixel resources.
@@ -76,7 +94,17 @@
 // its width is what the strip's label lane is sized from, so every pixel of it is paid
 // for out of the content column. Its subset is digits only.
 //
-// Every size here came down when the clock became five glyphs instead of two.
+// Except on flint, where it is paid for out of nothing. `zone` there is closed by the
+// wedge and not by the labels — see layout_compute — so any lane up to about sixteen
+// pixels wide is free, and TICK_10's "00" measured ten. It shares emery's TICK_14 now
+// and the content column did not move. Six pixels of ink on a 144 px display was the
+// least legible text on the face, and it was the least legible for no reason.
+//
+// Every size here came down when the clock became five glyphs instead of two, and
+// emery's went back up by two: measured off the framebuffer, "00:00" in NUM_40 left
+// fourteen pixels of the content column unused, and the ceiling below puts NUM_42
+// inside it with a pixel to spare. flint is already within a point of its own ceiling
+// and gabbro's row is chord-bound, so neither moved.
 // Orbitron is a wide face — "00:00" measures 3.55 em, so a digit is five sixths of the
 // point size — and beside the strip the clock is what the whole column's width is
 // budgeted against. **The ceiling is content_width / 3.55**, where the content width
@@ -88,9 +116,9 @@
 #  define RES_NUM_FONT   RESOURCE_ID_NUM_28
 #  define RES_DATE_FONT  RESOURCE_ID_DATE_20
 #  define RES_SLOT_FONT  RESOURCE_ID_SLOT_16
-#  define RES_TICK_FONT  RESOURCE_ID_TICK_10
+#  define RES_TICK_FONT  RESOURCE_ID_TICK_14
 #elif defined(PBL_PLATFORM_EMERY)
-#  define RES_NUM_FONT   RESOURCE_ID_NUM_40
+#  define RES_NUM_FONT   RESOURCE_ID_NUM_42
 #  define RES_DATE_FONT  RESOURCE_ID_DATE_28
 #  define RES_SLOT_FONT  RESOURCE_ID_SLOT_22
 #  define RES_TICK_FONT  RESOURCE_ID_TICK_14

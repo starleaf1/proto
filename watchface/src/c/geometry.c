@@ -45,6 +45,17 @@ static int16_t isqrt32(int32_t v) {
 #define ARC_TOP_DEG   315
 #define ARC_SPAN_DEG   90
 
+// Where `u` lands on the arc, in trig angles rather than in whole degrees.
+//
+// One function, because two callers have to agree to the pixel: a band's square end is
+// placed by this and so is the notch or the marker it has to line up with. A whole
+// degree of gabbro's arc is 2.2 px, which is a rounding either of them would show.
+static int32_t arc_angle(int32_t u) {
+  // Later is lower, so the angle *decreases* down the arc.
+  return DEG_TO_TRIGANGLE(ARC_TOP_DEG)
+       - div_round(u * DEG_TO_TRIGANGLE(ARC_SPAN_DEG), STRIP_SPAN_S);
+}
+
 // Point at radius r, angle a. int32 math before the int16 cast avoids overflow —
 // sin_lookup * r reaches ~7M at gabbro's 125px radius.
 static GPoint point_on_circle(GPoint c, int32_t r, int32_t a) {
@@ -57,9 +68,7 @@ Track track_at(const Layout *lo, int32_t u) {
   if (u < 0) u = 0;
   if (u > STRIP_SPAN_S) u = STRIP_SPAN_S;
 #ifdef PBL_ROUND
-  // Later is lower, so the angle *decreases* down the arc.
-  int32_t deg = ARC_TOP_DEG - div_round(u * ARC_SPAN_DEG, STRIP_SPAN_S);
-  int32_t a = TRIG_MAX_ANGLE * deg / 360;
+  int32_t a = arc_angle(u);
   return (Track){ .p = point_on_circle(lo->center, lo->arc_r, a), .a = a };
 #else
   int16_t y = lo->strip_top + (int16_t)div_round(u * (lo->strip_h - 1), STRIP_SPAN_S);
@@ -80,6 +89,54 @@ GPoint step_in(GPoint p, int32_t a, int32_t d) {
 GPoint step_side(GPoint p, int32_t a, int32_t d) {
   return GPoint(p.x + (int16_t)div_round(cos_lookup(a) * d, TRIG_MAX_RATIO),
                 p.y + (int16_t)div_round(sin_lookup(a) * d, TRIG_MAX_RATIO));
+}
+
+// How far outboard of the track a band's outer edge sits.
+//
+// It used to arrive by accident. A band was one thick stroked line per covered minute,
+// and a thick line's round cap ran stroke/2 — one pixel, on all three displays — past
+// the endpoint it was asked for. The accident was worth keeping: it pushes the band hard
+// against the screen edge and lines its outer edge up with an hour notch's own cap. So
+// it is asked for now instead of inherited.
+#define BAND_OUT_PX 1
+
+// A band on the track: everything between `u0` and `u1`, `depth` px deep, ending square.
+//
+// Square is the whole point of filling it rather than stroking it. The per-minute line
+// this replaced put a semicircular cap on both ends of every one of its samples, and the
+// two samples that had nothing overlapping them — the first and last minute of a run —
+// kept theirs, so every band came off the display with a pixel taken out of all four
+// corners. There is no cap style to set on a Pebble line; the fix is not to be drawing a
+// line.
+//
+// One expression per display shape, and it is the same split track_at() makes: a filled
+// rect on a rectangle, an annular sector on gabbro's arc. Both end on the ray, so a
+// band's end lines up with a notch at the same `u` on either shape.
+void fill_track_band(GContext *ctx, const Layout *lo, int32_t u0, int32_t u1,
+                     int16_t depth, GColor col) {
+  if (u0 < 0) u0 = 0;
+  if (u1 > STRIP_SPAN_S) u1 = STRIP_SPAN_S;
+  if (u1 < u0 || depth < 1) return;
+
+  graphics_context_set_fill_color(ctx, col);
+#ifdef PBL_ROUND
+  // Radii arc_r + BAND_OUT_PX down to arc_r - depth, cut off on the two rays.
+  // graphics_fill_radial sweeps clockwise from start to end and draws nothing if the
+  // start is the larger, and the arc's angle *decreases* as u grows — so the later end
+  // of the band is the one to start from.
+  int16_t r = lo->arc_r + BAND_OUT_PX;
+  graphics_fill_radial(ctx, GRect(lo->center.x - r, lo->center.y - r, 2 * r, 2 * r),
+                       GOvalScaleModeFitCircle, depth + BAND_OUT_PX,
+                       arc_angle(u1), arc_angle(u0));
+#else
+  // The +1 is the track's own column: `depth` is measured from it, so the band covers
+  // strip_x - BAND_OUT_PX through strip_x + depth *inclusive*.
+  int16_t y0 = track_at(lo, u0).p.y;
+  int16_t y1 = track_at(lo, u1).p.y;
+  graphics_fill_rect(ctx, GRect(lo->strip_x - BAND_OUT_PX, y0,
+                                depth + BAND_OUT_PX + 1, y1 - y0 + 1),
+                     0, GCornerNone);
+#endif
 }
 
 GRect text_plate(GRect box, GFont font, const char *text) {
@@ -115,6 +172,8 @@ static GPoint grow_from(GPoint p, GPoint c, int16_t d) {
                 p.y + (int16_t)div_round(dy * d, len));
 }
 
+static void fill_poly_haloed(GContext *ctx, GPoint *pts, int n, GColor ink, bool halo);
+
 void draw_tri(GContext *ctx, GPoint p0, GPoint p1, GPoint p2,
               GColor ink, bool filled, int16_t stroke_w, bool halo) {
   GPoint pts[3] = { p0, p1, p2 };
@@ -123,32 +182,18 @@ void draw_tri(GContext *ctx, GPoint p0, GPoint p1, GPoint p2,
   if (!path) return;
 
   if (halo && filled) {
-    // The same triangle grown HALO_PX away from its own centroid, filled in the
-    // background colour and then covered by the shape — which leaves a ring of about
-    // that width around it, and never more.
-    //
-    // The obvious version of this is a background-coloured *outline* stroked wider
-    // than the shape, and it is a trap. A stroked path miters its corners, and the
-    // miter at a sharp vertex runs far past the vertex itself — at the pointer's
-    // sharp tip a 4px stroke overshoots by more than five pixels. That is enough to
-    // reach past the tip's clearance and cut a background-coloured slot clean through
-    // an appointment band, which is exactly what it did. Growing the vertices instead
-    // bounds the halo by construction, at any angle and any sharpness.
-    GPoint c = GPoint((p0.x + p1.x + p2.x) / 3, (p0.y + p1.y + p2.y) / 3);
-    GPoint hp[3] = { grow_from(p0, c, HALO_PX), grow_from(p1, c, HALO_PX),
-                     grow_from(p2, c, HALO_PX) };
-    GPathInfo hinfo = { .num_points = 3, .points = hp };
-    GPath *hpath = gpath_create(&hinfo);
-    if (hpath) {
-      graphics_context_set_fill_color(ctx, COL_BG);
-      gpath_draw_filled(ctx, hpath);
-      gpath_destroy(hpath);
-    }
+    gpath_destroy(path);
+    // The grown-centroid halo and the fill both live in fill_poly_haloed(), which the
+    // wedge shares. See there for why a halo is never a wide stroked outline.
+    GPoint hp[3] = { p0, p1, p2 };
+    fill_poly_haloed(ctx, hp, 3, ink, true);
+    return;
   } else if (halo) {
     // A hollow shape has to keep whatever is under it showing through, so its halo
-    // stays an outline. The miter overshoot above is harmless here: the only hollow
-    // haloed shape is flint's upcoming marker, whose sharp vertex points inward into
-    // the free area rather than out at the track.
+    // stays an outline. The miter overshoot fill_poly_haloed() avoids is harmless here:
+    // the only hollow
+    // shape is flint's upcoming marker, whose sharp vertex points inward into the free
+    // area rather than out at the track.
     graphics_context_set_stroke_color(ctx, COL_BG);
     graphics_context_set_stroke_width(ctx, stroke_w + 2);
     gpath_draw_outline(ctx, path);
@@ -164,16 +209,75 @@ void draw_tri(GContext *ctx, GPoint p0, GPoint p1, GPoint p2,
   gpath_destroy(path);
 }
 
-void draw_track_triangle(GContext *ctx, const Layout *lo, int32_t u,
-                         int16_t depth, int16_t half_len,
-                         GColor ink, bool filled, bool halo) {
+// A filled polygon with an optional background halo — the shared body of draw_tri()
+// and draw_track_wedge(), and the halo is the reason it is shared. `n` is at most 4.
+static void fill_poly_haloed(GContext *ctx, GPoint *pts, int n, GColor ink, bool halo) {
+  if (n < 3 || n > 4) return;
+
+  if (halo) {
+    // The same shape grown HALO_PX away from its own centroid, filled in the
+    // background colour and then covered by the shape — which leaves a ring of about
+    // that width around it, and never more.
+    //
+    // The obvious version of this is a background-coloured *outline* stroked wider
+    // than the shape, and it is a trap. A stroked path miters its corners, and the
+    // miter at a sharp vertex runs far past the vertex itself — at the pointer's
+    // sharp tip a 4px stroke overshoots by more than five pixels. That is enough to
+    // reach past the tip's clearance and cut a background-coloured slot clean through
+    // an appointment band, which is exactly what it did. Growing the vertices instead
+    // bounds the halo by construction, at any angle and any sharpness.
+    int32_t sx = 0, sy = 0;
+    for (int i = 0; i < n; i++) { sx += pts[i].x; sy += pts[i].y; }
+    GPoint c = GPoint((int16_t)(sx / n), (int16_t)(sy / n));
+    GPoint hp[4];
+    for (int i = 0; i < n; i++) hp[i] = grow_from(pts[i], c, HALO_PX);
+    GPathInfo hinfo = { .num_points = (uint32_t)n, .points = hp };
+    GPath *hpath = gpath_create(&hinfo);
+    if (hpath) {
+      graphics_context_set_fill_color(ctx, COL_BG);
+      gpath_draw_filled(ctx, hpath);
+      gpath_destroy(hpath);
+    }
+  }
+
+  GPathInfo info = { .num_points = (uint32_t)n, .points = pts };
+  GPath *path = gpath_create(&info);
+  if (!path) return;
+  graphics_context_set_fill_color(ctx, ink);
+  gpath_draw_filled(ctx, path);
+  gpath_destroy(path);
+}
+
+// A point marker: a wedge off the track, `depth` px deep, `half_len` of track either
+// side of `u` at its base, and `tip_half` either side at its inner end.
+//
+// The tip is blunt, and that is the whole of why this is not draw_tri(). A marker used
+// to be a triangle with depth about three times its half-base, which means the inner
+// third of it tapers below two pixels and draws as a hairline — thinner than the minute
+// notches it exists to stand out from. Measured on emery: the shape came off the display
+// as a blob with a whisker, and the whisker was the apex, which is the end carrying the
+// time. Stopping the taper at `tip_half` keeps the wedge at least three pixels across
+// for its whole length without giving up any depth, so the depth ladder in geometry.h
+// and everything `zone` is measured from stay where they were.
+//
+// It also buys a second channel for a merged marker. Depth alone said "more than one"
+// in a 25% difference — 12 px against 15 on flint — which is not a difference a reader
+// can see without the other one to compare against. A blunter tip is visible on its own.
+void draw_track_wedge(GContext *ctx, const Layout *lo, int32_t u,
+                      int16_t depth, int16_t half_len, int16_t tip_half,
+                      GColor ink, bool halo) {
+  if (tip_half < 1) tip_half = 1;
+  if (tip_half > half_len) tip_half = half_len;
+
   Track t = track_at(lo, u);
-  GPoint apex = step_in(t.p, t.a, depth);
-  int16_t stroke_w = stroke_px(half_len / 3);
-  draw_tri(ctx, apex,
-           step_side(t.p, t.a,  half_len),
-           step_side(t.p, t.a, -half_len),
-           ink, filled, stroke_w, halo);
+  GPoint tip = step_in(t.p, t.a, depth);
+  GPoint pts[4] = {
+    step_side(t.p, t.a,  half_len),
+    step_side(tip,  t.a,  tip_half),
+    step_side(tip,  t.a, -tip_half),
+    step_side(t.p, t.a, -half_len),
+  };
+  fill_poly_haloed(ctx, pts, 4, ink, halo);
 }
 
 // Clamp a full-width row to what the strip and the display leave it at that height.
@@ -246,8 +350,8 @@ Layout layout_compute(GRect bounds, GFont num_font, GFont date_font,
   // marker is the deepest of that. The labels then start past all of it, so nothing is
   // ever over or under them.
   lo.rule_len = lo.notch_len * MARKER_GROUP_PCT / 100;
-  lo.label_x = lo.rule_len + LABEL_GAP;
-  lo.zone = lo.label_x + lo.label_w + 2;
+  lo.label_x = lo.rule_len + margin;
+  lo.zone = lo.label_x + lo.label_w + margin;
 #else
   // flint puts the labels between the ruler and the wedge — into the free area the wedge
   // was already claiming, not past it. So the wedge keeps the tip gap and the length it
@@ -255,11 +359,11 @@ Layout layout_compute(GRect bounds, GFont num_font, GFont date_font,
   // nothing at all: `zone` is what it was before there were any numbers on this face.
   // The two overlap in depth and are dealt with in time instead, by dropping the label
   // the wedge lands on. See draw_hour_label.
-  lo.label_x = lo.notch_len + LABEL_GAP;
+  lo.label_x = lo.notch_len + margin;
   lo.ptr_tip = lo.notch_len + POINTER_TIP_GAP;
   int16_t label_end = lo.label_x + lo.label_w;
   int16_t ptr_end = lo.ptr_tip + p_len;
-  lo.zone = (label_end > ptr_end ? label_end : ptr_end) + 2;
+  lo.zone = (label_end > ptr_end ? label_end : ptr_end) + margin;
 #endif
 
 #ifdef PBL_ROUND
@@ -301,8 +405,18 @@ Layout layout_compute(GRect bounds, GFont num_font, GFont date_font,
   // only there when an appointment is running, and a row that changed height when it
   // appeared would move the countdown out from under the reader's eye at the one
   // moment they are watching it.
-  lo.bar_h = stroke_px(ss.h / 6);
-  if (lo.bar_h < 3) lo.bar_h = 3;
+  //
+  // A sixth put this on 3 px for all three displays — the floor caught flint and emery
+  // both, and gabbro's own sixth rounded back down to 3 — so the one element that has to
+  // read as a *bar* never grew past the thickness of an hour notch.
+  //
+  // Five is the floor now, and five is what all three land on, because an outlined track
+  // is what draw_progress() draws and an outline needs an inside. At three the top and
+  // bottom rules leave one pixel between them and the whole thing came off flint as a
+  // solid slab with a scratch in it — measured, and worse than the hairline it replaced.
+  // One pixel of rule, three of interior, one of rule is the smallest honest bar.
+  lo.bar_h = stroke_px(ss.h / 4);
+  if (lo.bar_h < 5) lo.bar_h = 5;
 
   int16_t num_h = ns.h + 6;
   int16_t date_h = ds.h + 4;

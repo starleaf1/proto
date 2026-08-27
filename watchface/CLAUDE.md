@@ -194,6 +194,11 @@ numbers, digits only, and the measured width of `"00"` in it *is* the label lane
 changing that size moves the text column. The `characterRegex` subsets are aggressive —
 **adding a glyph to any string means editing the regex** in `package.json`.
 
+`flint` and `emery` share `TICK_14`, and on `flint` that is free: `zone` there is closed
+by the wedge and not by the labels, so any lane up to about sixteen pixels wide costs the
+content column nothing. It was `TICK_10` — six pixels of ink on a 144 px display, the
+least legible text on the face, and least legible for no reason.
+
 **The clock is the constraint on the whole layout, and it is a width constraint.**
 `"00:00"` in Orbitron measures 3.55 em, so `NUM_*` may not exceed roughly the content
 column's width divided by 3.55 — and the column is what is left after the strip claims
@@ -241,16 +246,39 @@ code; this is the index.
   resource's metrics, not the source font's.
 - **Coverage is one byte per minute, not per pixel or per degree.** See `s_cov` in
   `strip.c`. A minute is under a pixel of track on all three displays, so quantising to
-  one is free, and 241 bytes is less than the dial's 360. Bands are then drawn one
-  stroked line per covered minute, which is the same technique the ring used per degree —
-  the samples are 0.7–0.9px apart under a 3px stroke, so they overlap into a solid band.
-- **A band's asked-for depth and its drawn depth are two different numbers.** See
-  `draw_bands` in `strip.c`. A thick line's caps run `stroke/2` past each endpoint, so
-  asking for a depth drew a band that much deeper than the notch zone it was supposed to
-  fill. The outward overshoot is wanted — it pushes the band hard against the screen
-  edge — so only the inner end is shortened. **Measure a band off a screenshot before
-  trusting any depth constant here**; the arithmetic in the source is not what reaches
-  the display.
+  one is free, and 241 bytes is less than the dial's 360.
+- **A band is filled per *run* of equal-weight minutes, not stroked per minute.** See
+  `draw_bands` in `strip.c` and `fill_track_band` in `geometry.c`. The per-minute version
+  was the ring's per-degree technique carried over: 241 thick lines spaced under a pixel
+  apart, overlapping into something solid. It worked, and it paid for the solidity with
+  the shape of the ends — a thick Pebble line is capped with a semicircle and there is no
+  cap style to turn that off, so the one sample at each end of a run had no neighbour to
+  cover its cap and every band came off the display with a pixel bitten out of all four
+  corners. Filling the span instead ends it square, and a span is what `s_cov` was already
+  holding.
+- **The shallower band is filled first.** Where a running band abuts an upcoming one the
+  two runs can land on the same pixel row, consecutive minutes being under a pixel apart,
+  and the deeper has to win it — the same rule the `max()` in `build_coverage` applies a
+  minute at a time.
+- **The colour displays' "now" rule is filled by `fill_track_band` too.** See
+  `strip_draw_now`. It is the same kind of object as a band — a span of the track, filled
+  to a depth — and stroked it had the same rounded ends, which on the one element the
+  whole face is measured against read as a lozenge laid over the strip rather than a rule
+  struck through it. Filling it also gives back what the caps were spending: `rule_len` is
+  the deepest thing the strip draws and `margin` is the gap between that and the hour
+  numbers, and the inner cap was taking two of those pixels on `emery` and all three on
+  `gabbro`. Its width is still the stroke width it was tuned to, now as `w/2` of track
+  either side of now.
+- **Everything the strip fills reaches one pixel outboard of the track**, and that pixel
+  used to be an accident: it was the stroke's outward cap. It lines the band's outer edge up with an
+  hour notch's own cap and pushes it hard against the screen edge, so `BAND_OUT_PX` in
+  `geometry.c` now asks for it. **Measure a band off a screenshot before trusting a depth
+  constant here**; `depth` is a distance from the track and the drawn thickness is that
+  plus the overshoot plus the track's own column.
+- **`gabbro`'s arc angles are trig angles, not whole degrees.** See `arc_angle` in
+  `geometry.c`. One degree of that arc is 2.2 px, so a band's square end and the notch it
+  has to line up with cannot each round to a degree of their own. `track_at` and
+  `fill_track_band` both go through the one function.
 - **Every stroke width goes through `stroke_px()`, and comes back odd.** See
   `geometry.h`. The SDK supports odd widths only — an even one is stored as asked but
   the drawing routines round it down, so a requested 4 reaches the screen as 3 and
@@ -262,6 +290,14 @@ code; this is the index.
   pixel.
 - **Hour notches are thicker, not longer.** Length is already spoken for: it is what
   separates a notch from a band, which fills part of the same depth.
+- **"Thicker" is a ratio to its neighbour, not a divisor of its own.** See `draw_notches`
+  in `strip.c`. The two weights were `radius/24` and `radius/90`, which is to say 3/3/5
+  against 1/1/1 — a minute notch was a single pixel on all three displays, so on `gabbro`
+  it was a hairline on a 260 px screen and the pitch between the numbered notches stopped
+  registering at all. The minute notch is a fortieth now (1/1/3), and the hour notch is
+  floored at twice it, which lifts `gabbro`'s to 7 and leaves the other two where they
+  were. Both floors matter: with the minute notch at 3 and the hour notch still 5, every
+  graduation on `gabbro` looked the same and only the numbers said which were hours.
 - **Notches sit on the wall clock's quarter hours, not at multiples of fifteen minutes
   from the top of the window.** That is what makes the strip scroll — every notch's
   position slides by the same fraction of a pitch each minute, and the stationary pointer
@@ -278,12 +314,35 @@ code; this is the index.
   Dropping it also fixed a real defect: measured on `flint`, a hollow wedge at this size
   is a 1px outline under a 3px background halo, and where it crossed a band it striped
   the two into noise.
+- **A point marker is a blunt wedge, not a triangle.** See `draw_track_wedge` in
+  `geometry.c`. Depth is about three times the half-base on every display, so a triangle
+  spends its inner third under two pixels tall — thinner than the minute notches the shape
+  exists to stand out from — and the part that vanished was the apex, which is the end
+  carrying the time. Measured on `emery`: a blob with a whisker. Stopping the taper at a
+  `tip_half` costs no depth, so the ladder in `geometry.h` and everything `zone` is
+  measured from stay where they were.
+- **A merged marker is wider at the base as well as deeper and blunter.** Depth alone was
+  a 25% difference — 12 px against 15 on `flint` — which is not a difference a reader can
+  see without the single case beside it to compare against. Blunting alone was worse: a
+  wedge with the taper taken out is a rectangle, and the group came off `flint` as a
+  horizontal bar that stopped reading as a marker at all. Widening the base restores the
+  taper at the larger size, so a group looks like more of the same thing rather than like
+  a different thing.
 - **The notches sit at a different depth in the stack on `flint`.** See `strip.c`. On the
   colour platforms they are drawn last — ink over the bands and the markers both, so the
   ruler the timeline is read off stays unbroken, and black over cerulean or amber costs
   nothing to see. `flint` draws the band and the notches in the same ink, so there the
   notches invert under a running band and stay *below* the markers; a cut through a solid
   marker would split the one shape that says "overdue".
+- **An inverted notch is two segments, and the split is where the band stops.** See
+  `notch_inverts` and `band_depth` in `strip.c`. Inverting the *whole* notch is what this
+  did, and it deleted the ruler: a notch is longer than a running band is deep — two
+  pixels longer on `flint` — so those two were being painted in the background colour on
+  top of the background. Under a running appointment the strip came off the display as a
+  black bar with white slots in it and no graduations anywhere, and a white slot where a
+  notch cut looked exactly like the white gap where one band run ends and the next begins.
+  The cut belongs only where there is band under it; past that the notch is ink like every
+  other notch.
 - **"Now" is a different *shape* on flint than on the colour displays,** and it is the
   only element on the face that is. See `strip_draw_now`. Where there is colour it is a
   red rule struck across the strip — over the bands, the notches and the markers alike,
@@ -342,6 +401,17 @@ code; this is the index.
   the companion-down alert — where it used to be reserved for the alert alone.
 - **Both bands use one hue.** `GColorCeleste` was too pale to see on white, and a second
   tint is redundant when depth and notch-inversion already say it.
+- **The palette is split by role, and the split is a measured contrast ratio.** See
+  `theme.h`. Against `COL_BG`, `GColorChromeYellow` is 1.9:1 and `GColorVividCerulean` is
+  2.6:1 — which a ten-pixel band of solid fill survives and two glyphs of `"28%"` do not.
+  An ink that draws **text** needs 4.5:1; an ink that draws a large solid **shape** can
+  live near 2.5:1. So the clock went to `GColorCobaltBlue` (5.0:1) and the warnings row
+  to `GColorWindsorTan` (4.1:1), while the bands and the point markers keep the brighter
+  tints. The rejection of `GColorGreen`/`GColorYellow` at 1.4:1 and 1.1:1 was measured and
+  right; it just stopped one step short of the pair it kept.
+- **The clock is no longer the band's colour, and that is the same fix.** `COL_ACCENT`
+  and `COL_BAND` were one macro apart and one hue identical, so the element the face
+  exists to show shared an ink with the strip's decoration and the eye grouped them.
 - **Text rows knock out their own footprint** before drawing. Cheap (the background is
   already that colour) and it is what stops a marker spiking through the countdown.
 - **Point markers sit at their exact position and merge only when they would overlap.**
@@ -358,6 +428,30 @@ code; this is the index.
 - **Counting down draws no bar at all.** A bar is a thing that fills up, so its presence
   already says the number is climbing; a second empty bar under a countdown would invite
   reading it as a countdown bar running the other way. Its absence is the distinction.
+- **The empty track is an outlined rectangle, and that is why the bar is five pixels.**
+  See `draw_progress` in `slots.c` and `bar_h` in `layout_compute`. A centre hairline does
+  say where 100% is and says nothing else: a fifth of the way through, the bar came off
+  all three displays as a dash with a dot on its left end and the two did not read as one
+  object. An outline gives the fill a container, and an outline needs an inside — at
+  `bar_h` 3 the two rules leave one pixel between them and the whole thing is a solid slab
+  with a scratch in it. One pixel of rule, three of interior, one of rule is the floor,
+  and all three displays land on it. It is still weight rather than colour doing the work,
+  so `flint` keeps the distinction.
+- **Every outlined glyph gets at least three pixels of stroke, and it used to get one.**
+  See `glyph_stroke` in `slots.c`. A slot glyph is 17 px on `flint`, 22 on `emery` and 25
+  on `gabbro`, so the divisor of nine this was written with put `stroke_px()` on 1 for all
+  three — a maneuver arrow whose shaft is a single pixel under a filled head reads as a
+  blob with a whisker, and the phone silhouette reads as an empty box. Three, because
+  `stroke_px()` yields only odd widths and there is nothing between a hairline and three.
+- **The battery and the calendar keep the hairline, and the other two do not.** Those two
+  are mostly interior — a cell is eight pixels tall on `flint`, and it is the calendar's
+  *open* lower half against its filled header that makes it a calendar — so a three-pixel
+  stroke closes up the thing the shape is made of. The maneuvers and the phone are edges,
+  and edges can carry it.
+- **The maneuver head came down when the shaft went up.** `HEAD_LEN`/`HEAD_HALF` were
+  tuned against a one-pixel shaft, and a head two thirds of the grid across swallowed a
+  three-pixel one whole: the glyph came off `emery` as a solid lump with no direction in
+  it. About three times the shaft's width is what reads as a head.
 - **The nav row reserves no height, and that is what makes five rows fit.** Everything
   above it is flowed down from the pointer and the warnings row is pinned to the bottom,
   so nav lives in the slack between them and nothing moves whether it draws or not.
@@ -365,6 +459,13 @@ code; this is the index.
   alert the *first* slot on the face, on the grounds that it invalidates everything
   phone-fed. It is last now because that was asked for; red still marks it, so it is
   demoted in position rather than in salience.
+- **The lane gaps are `margin`, not a literal 3.** See `layout_compute` and the note
+  above `Layout` in `geometry.h`. `LABEL_GAP` was 3 on a 144 px display and 3 on a 260 px
+  one, and so was the clearance closing `zone` on the inboard side — proportionally
+  tighter exactly where there was most room. Measured on `emery`, `"10"` and the `T` of
+  `"THU 27"` came out two pixels apart and the hour numbers read as the text column's
+  first glyph rather than as graduations of the ruler. `margin` is 3/4/5, which on `flint`
+  is the same 3 the constant was tuned against, so that display does not move.
 - **The date is `%a %d`, not `%a %d %b`.** There is not room for the month at a readable
   size beside the strip on any of the three platforms — `gabbro`'s chord at the date's
   height is the tightest.

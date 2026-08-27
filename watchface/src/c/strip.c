@@ -175,41 +175,47 @@ static void build_points(const Layout *lo, time_t now) {
   s_pt_n = out;
 }
 
+// How deep a band of the given coverage weight fills, in pixels from the track.
+//
+// Two callers, which is why it is a function. The bands draw themselves with it, and
+// the notches need it to know where a running band stops — see draw_notches.
+//
+// Rounded, not truncated. These are single-digit pixel counts on flint, where losing
+// most of a pixel to integer division is a tenth of the band.
+static int16_t band_depth(const Layout *lo, uint8_t weight) {
+  if (weight == COV_NOW) {
+    int16_t d = (lo->notch_len * BAND_NOW_PCT + 50) / 100;
+    return (d < 3) ? 3 : d;
+  }
+  int16_t d = (lo->notch_len * BAND_SOON_PCT + 50) / 100;
+  return (d < 2) ? 2 : d;
+}
+
 static void draw_bands(GContext *ctx, const Layout *lo) {
-  // Rounded, not truncated. These are single-digit pixel counts on flint, where losing
-  // most of a pixel to integer division is a tenth of the band.
-  int16_t now_depth  = (lo->notch_len * BAND_NOW_PCT  + 50) / 100;
-  int16_t soon_depth = (lo->notch_len * BAND_SOON_PCT + 50) / 100;
-  if (now_depth < 3) now_depth = 3;
-  if (soon_depth < 2) soon_depth = 2;
-
-  // One line per minute, stroked wide enough that consecutive samples overlap.
-  // Worst-case spacing is emery, 220px of track over 240 minutes — 0.92px per minute
-  // — so three pixels closes every gap on all three displays with room to spare.
+  // One fill per *run* of equally weighted minutes, not one line per minute.
   //
-  // Through stroke_px() because the cap below is derived from this number and has to be
-  // derived from the width that is actually drawn: an even request comes back one
-  // narrower, and a cap computed from the request then overshoots.
-  int16_t stroke = stroke_px(2 + lo->radius / 64);
-  graphics_context_set_stroke_width(ctx, stroke);
-  graphics_context_set_stroke_color(ctx, COL_BAND);
-
-  // A thick line's caps run stroke/2 past each of its endpoints, so asking for a line
-  // `depth` long draws a band depth + stroke/2 deep — deeper than the notch zone it is
-  // meant to fill, and deeper than the notches themselves. The outward overshoot is
-  // wanted, since it pushes the band's outer edge hard against the screen; the inward
-  // one is not, so the line is shortened by exactly that much. Measure a band off a
-  // screenshot before trusting a depth here: what is asked for and what is drawn are
-  // two different numbers.
-  int16_t cap = stroke / 2;
-
-  for (int32_t m = 0; m <= STRIP_SPAN_MIN; m++) {
-    if (s_cov[m] == COV_NONE) continue;
-    int16_t depth = (s_cov[m] == COV_NOW) ? now_depth : soon_depth;
-    int32_t len = depth - cap;
-    if (len < 1) len = 1;
-    Track t = track_at(lo, m * 60);
-    graphics_draw_line(ctx, t.p, step_in(t.p, t.a, len));
+  // The per-minute version was a sampling trick — 241 thick stroked lines spaced under a
+  // pixel apart, overlapping into something solid — and it worked, but it paid for the
+  // solidity with the shape of the ends: a thick line is capped with a semicircle, and
+  // the one sample at each end of a run had no neighbour to cover its cap, so every band
+  // came out with a pixel bitten off each of its four corners. Runs are also the honest
+  // unit. A band is a span, s_cov already holds it as one, and drawing it as a span is
+  // both squarer and two orders of magnitude fewer draw calls.
+  //
+  // Shallower pass first. Where a running band abuts an upcoming one the two runs can
+  // land on the same pixel row — consecutive minutes are under a pixel apart on all
+  // three displays — and the deeper of the two has to win that row, which is the same
+  // rule the max() in build_coverage() applies a minute at a time.
+  static const uint8_t order[2] = { COV_SOON, COV_NOW };
+  for (int pass = 0; pass < 2; pass++) {
+    uint8_t want = order[pass];
+    int16_t depth = band_depth(lo, want);
+    for (int32_t m = 0; m <= STRIP_SPAN_MIN; ) {
+      if (s_cov[m] != want) { m++; continue; }
+      int32_t m0 = m;
+      while (m <= STRIP_SPAN_MIN && s_cov[m] == want) m++;
+      fill_track_band(ctx, lo, m0 * 60, (m - 1) * 60, depth, COL_BAND);
+    }
   }
 }
 
@@ -314,7 +320,7 @@ static void draw_hour_label(GContext *ctx, const Layout *lo, GFont font,
   // Two pixels wider than the box on each side, which is the pad text_plate() uses and
   // is here for a reason a screenshot gave up: cut to the box exactly, a marker's apex
   // stopped one pixel short of the first digit and the two read as one shape. Not three:
-  // the lane is LABEL_GAP off the notch zone, and three would take the tip off the hour
+  // the lane is `margin` off the notch zone, and three would take the tip off the hour
   // notch this label is naming.
   knock_out(ctx, GRect(box.origin.x - 2, box.origin.y,
                        box.size.w + 4, box.size.h));
@@ -343,9 +349,23 @@ static void draw_labels(GContext *ctx, const Layout *lo, GFont font) {
 // notches from the "now" mark. This pass only records where they are; draw_labels()
 // puts them on the screen once everything they have to sit over is down.
 static void draw_notches(GContext *ctx, const Layout *lo, time_t now) {
+  // A ninetieth of the radius is 0, 1 and 1 on the three displays, so stroke_px() put
+  // every quarter-hour graduation on a single pixel — on gabbro that is a hairline on a
+  // 260 px screen beside a five-pixel hour notch, and the ruler's pitch stopped being
+  // legible at all between the numbered notches. A fortieth is still 1 on flint and
+  // emery, where one pixel is the right weight and the only other option is three, and
+  // it reaches three on gabbro, which is the display that has the room for it.
+  int16_t min_w = stroke_px(lo->radius / 40);
+
+  // The hour notch is thicker, and "thicker" is a ratio, not a divisor of its own. A
+  // twenty-fourth of the radius gave 3/3/5, which was two and three times the minute
+  // notch on flint and emery and — once the minute notch on gabbro grew to three — barely
+  // more than it there. Measured on gabbro, the ruler lost its structure entirely: every
+  // graduation looked the same and only the numbers said which were hours. Twice its
+  // neighbour is the floor, and stroke_px() takes it to the next odd width up.
   int16_t hour_w = stroke_px(lo->radius / 24);
   if (hour_w < 3) hour_w = 3;
-  int16_t min_w = stroke_px(lo->radius / 90);
+  if (hour_w < 2 * min_w) hour_w = stroke_px(2 * min_w + 1);
 
   time_t start = now - STRIP_BACK_S;
   struct tm lt = *localtime(&start);
@@ -375,10 +395,33 @@ static void draw_notches(GContext *ctx, const Layout *lo, time_t now) {
     if (u > STRIP_SPAN_S) break;
 
     graphics_context_set_stroke_width(ctx, (m == 0) ? hour_w : min_w);
-    graphics_context_set_stroke_color(ctx, notch_inverts(u) ? COL_BG : COL_INK);
 
     Track tr = track_at(lo, u);
-    graphics_draw_line(ctx, tr.p, step_in(tr.p, tr.a, lo->notch_len));
+    GPoint inner = step_in(tr.p, tr.a, lo->notch_len);
+
+    if (notch_inverts(u)) {
+      // Two segments, and the split is where the band stops.
+      //
+      // Inverting the whole notch is what this did, and it deleted the ruler. A notch is
+      // longer than a running band is deep — two pixels longer on flint — so those last
+      // two were being drawn in the background colour on top of the background. Under a
+      // running appointment the strip came off the display as a black bar with white
+      // slots in it and no graduations anywhere, and a white slot where a notch cut
+      // looked exactly like the white gap where one band run ends and the next begins.
+      //
+      // The cut belongs only where there is band under it. Past that, the notch is ink
+      // like every other notch, and the ruler runs unbroken through the appointment.
+      int16_t bd = band_depth(lo, COV_NOW);
+      graphics_context_set_stroke_color(ctx, COL_BG);
+      graphics_draw_line(ctx, tr.p, step_in(tr.p, tr.a, bd));
+      if (bd + 1 <= lo->notch_len) {
+        graphics_context_set_stroke_color(ctx, COL_INK);
+        graphics_draw_line(ctx, step_in(tr.p, tr.a, bd + 1), inner);
+      }
+    } else {
+      graphics_context_set_stroke_color(ctx, COL_INK);
+      graphics_draw_line(ctx, tr.p, inner);
+    }
 
     if (m == 0 && s_hour_n < (int)(sizeof s_hours / sizeof s_hours[0])) {
       s_hours[s_hour_n++] = (Hour){ .u = u, .hh = (uint8_t)hh };
@@ -425,10 +468,23 @@ static void draw_markers(GContext *ctx, const Layout *lo) {
     // ink, which is flint's situation and nobody else's. On emery and gabbro amber
     // against cerulean is already two things, and outlining it in background just
     // puts a gap in the ruler running over the top.
-    draw_track_triangle(ctx, lo, s_pts[i].u, depth, hl,
-                        late ? COL_TASK_LATE : COL_TASK_SOON,
-                        true,
-                        PBL_IF_COLOR_ELSE(false, true));
+    // The inner end is blunt rather than pointed. See draw_track_wedge: a triangle at
+    // this depth-to-base ratio spends its last third under two pixels tall, which is
+    // thinner than the minute notches the shape exists to stand out from.
+    //
+    // A merged marker is wider at the base as well as deeper and blunter, and the base
+    // is the part that had to be added. Blunting alone said "merged" by taking the taper
+    // out, and a wedge with no taper is a rectangle: on flint the group came off the
+    // display as a horizontal bar and stopped reading as a marker at all. Widening the
+    // base restores the taper at the larger size, which is the point — a group should
+    // look like more of the same thing, not like a different thing. It is also honest,
+    // a group being exactly the events that could not be drawn apart.
+    int16_t base = grouped ? (hl * 5 / 4) : hl;
+    int16_t tip  = grouped ? (base / 2) : (base / 4);
+
+    draw_track_wedge(ctx, lo, s_pts[i].u, depth, base, tip,
+                     late ? COL_TASK_LATE : COL_TASK_SOON,
+                     PBL_IF_COLOR_ELSE(false, true));
   }
 }
 
@@ -446,7 +502,9 @@ static void draw_markers(GContext *ctx, const Layout *lo) {
 //
 // Where there is colour it is a **rule struck across the strip** — through the bands,
 // the notches and the markers alike, over the top of all of them, as deep as the strip's
-// own elements go and no deeper. What it costs to read that way it takes back in hue: red
+// own elements go and no deeper, which it now is exactly rather than approximately: it is
+// filled as a span of the track, so `rule_len` is where it stops instead of where its
+// end cap started. What it costs to read that way it takes back in hue: red
 // is not on the strip anywhere else, so a red line is unambiguous at a glance, and a line
 // *through* the ruler says "the ruler is here" in a way a shape beside it has to be
 // learned to mean. It also frees the whole free area, which is where the hour labels
@@ -459,15 +517,28 @@ static void draw_markers(GContext *ctx, const Layout *lo) {
 // reach inward. Its tip stops short of the notch zone so the strip stays the bands' and
 // markers' alone, and the halo keeps it legible where it meets a band in the same ink.
 void strip_draw_now(GContext *ctx, const Layout *lo) {
-  Track t = track_at(lo, STRIP_BACK_S);
-
 #ifdef PBL_COLOR
+  // The rule is a band like any other — a span of the track, filled to a depth — so it is
+  // drawn by the same primitive, and that is what squares its ends. Stroked, it came out
+  // a lozenge: a thick line is capped with a semicircle at each end, so the one element
+  // the whole face is measured against had a rounded nose sticking off the strip and a
+  // rounded tail poking into the hour labels' lane.
+  //
+  // Squaring it also gives back the depth those caps were spending. `rule_len` is the
+  // deepest thing the strip draws and `margin` is the gap between that and the
+  // numbers; the inner cap was taking two of them on emery and all three on gabbro, which
+  // is why the rule and the hour beside it read as touching there.
+  //
+  // The width is still a stroke width, because it is still what it was chosen to be — a
+  // thickness across the track, wider than an hour notch — and w/2 either side of now is
+  // the same w pixels the stroke drew.
   int16_t w = stroke_px(lo->radius / RULE_W_DIV);
   if (w < 3) w = 3;
-  graphics_context_set_stroke_color(ctx, COL_INDEX);
-  graphics_context_set_stroke_width(ctx, w);
-  graphics_draw_line(ctx, t.p, step_in(t.p, t.a, lo->rule_len));
+  int32_t half = u_of_px(lo, w / 2);
+  fill_track_band(ctx, lo, STRIP_BACK_S - half, STRIP_BACK_S + half,
+                  lo->rule_len, COL_INDEX);
 #else
+  Track t = track_at(lo, STRIP_BACK_S);
   int16_t phw = pointer_half(lo);
   int16_t len = lo->notch_len * POINTER_LEN_PCT / 100;
 

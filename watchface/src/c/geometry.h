@@ -48,12 +48,21 @@
 // ruler it crosses — hue says that too, but hue is not a shape.
 #define RULE_W_DIV 18
 
-// Between the hour labels' lane and whatever sits outboard of it — the notch zone on
-// flint, the "now" rule's inner end on colour.
+// The gap between the hour labels' lane and whatever sits outboard of it — the notch
+// zone on flint, the "now" rule's inner end on colour — is `margin`, not a constant.
+// So is the clearance that closes `zone` on the inboard side, against the text column.
 //
-// Three, not one: on flint it is clearance from an hour notch, which is the *thicker*
-// kind, and from the halo a marker in the same lane carries.
-#define LABEL_GAP 3
+// It was a literal 3 on both counts, and a literal is the one thing a length on this
+// face may not be: three pixels is a third of flint's notch on a 144 px display and a
+// fifth of gabbro's on a 260 px one, so the lane got proportionally tighter exactly
+// where there was most room. Measured on emery, "10" and the T of "THU 27" came out two
+// pixels apart and the hour numbers read as the text column's first glyph rather than
+// as graduations of the ruler. `margin` is 3/4/5 and is already the face's unit of "far
+// enough apart to be separate things"; on flint it is the same 3 this used to be, so
+// the display the old constant was tuned against does not move.
+//
+// It has to clear an hour notch, which is the *thicker* kind, and the halo a marker in
+// the same lane carries — see layout_compute.
 
 // Between the countdown's digits and the progress bar under them.
 #define PROGRESS_GAP 2
@@ -184,6 +193,24 @@ GPoint step_in(GPoint p, int32_t a, int32_t d);
 // give the two base corners of a marker.
 GPoint step_side(GPoint p, int32_t a, int32_t d);
 
+// A band on the track: everything between `u0` and `u1` (seconds from the top of the
+// visible window), filled `depth` px inward from the track, ending square on the ray at
+// each end and reaching one pixel outboard of the track.
+//
+// Square ends are the reason this is a fill and not a stroke. A band used to be one thick
+// line per covered minute, and a thick line's caps are semicircles, so the first and last
+// sample of a run kept a cap nothing overlapped and every band lost a pixel off all four
+// corners. Pebble has no cap style to set, so the answer is to stop drawing a line.
+//
+// Branches on display shape, and it is track_at()'s split: a filled rect on a rectangle,
+// an annular sector on gabbro's arc, both cut on the ray so a band's end lines up with
+// whatever else sits at the same `u`.
+//
+// The colour displays' "now" rule goes through here too. It is the same thing — a span of
+// the track, filled to a depth — and it had the same lozenge ends for the same reason.
+void fill_track_band(GContext *ctx, const Layout *lo, int32_t u0, int32_t u1,
+                     int16_t depth, GColor col);
+
 // The tight bounding box of one text row's ink inside `box`, padded a little.
 // Follows ROW_ALIGN, because a plate that stayed centred while the text moved left
 // would knock out the wrong pixels and leave a marker crossing the digits.
@@ -202,9 +229,19 @@ void knock_out(GContext *ctx, GRect r);
 void draw_tri(GContext *ctx, GPoint p0, GPoint p1, GPoint p2,
               GColor ink, bool filled, int16_t stroke_w, bool halo);
 
-// A triangle with its base on the track at `u` and its apex pointing inward.
-// Hollow shapes get a stroke of half_len/2, so the outline scales with the
-// marker instead of vanishing to a hairline on the larger displays.
-void draw_track_triangle(GContext *ctx, const Layout *lo, int32_t u,
-                         int16_t depth, int16_t half_len,
-                         GColor ink, bool filled, bool halo);
+// A point marker: a wedge off the track at `u`, `depth` px deep, `half_len` of track
+// either side of it at the base and `tip_half` either side at the inner end.
+//
+// Blunt-tipped, and that is not a detail. A triangle whose depth is about three times
+// its half-base — which is what every marker on this face is — tapers below two pixels
+// for its inner third and draws that third as a hairline thinner than the ruler's own
+// minute notches. The apex is the end that carries the time, so the shape was least
+// visible exactly where it was most load-bearing. `tip_half` stops the taper.
+//
+// A merged marker is passed a wider `half_len` and a wider `tip_half` as well as more
+// depth — see draw_markers. Depth alone was a 25% difference and unreadable without the
+// single-marker case beside it to compare against; blunting alone took the taper out and
+// left a rectangle.
+void draw_track_wedge(GContext *ctx, const Layout *lo, int32_t u,
+                      int16_t depth, int16_t half_len, int16_t tip_half,
+                      GColor ink, bool halo);

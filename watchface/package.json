@@ -60,16 +60,7 @@
         },
         {
           "type": "font",
-          "name": "TICK_10",
-          "file": "fonts/rajdhani_semibold.ttf",
-          "characterRegex": "[0-9]",
-          "targetPlatforms": [
-            "flint"
-          ]
-        },
-        {
-          "type": "font",
-          "name": "NUM_40",
+          "name": "NUM_42",
           "file": "fonts/orbitron.ttf",
           "characterRegex": "[0-9:]",
           "targetPlatforms": [
@@ -101,6 +92,7 @@
           "file": "fonts/rajdhani_semibold.ttf",
           "characterRegex": "[0-9]",
           "targetPlatforms": [
+            "flint",
             "emery"
           ]
         },
