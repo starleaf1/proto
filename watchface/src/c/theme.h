@@ -20,20 +20,9 @@
 #define COL_INK         GColorBlack
 
 // The clock, and the countdown's progress bar.
-//
-// Cobalt rather than the cerulean this used to be, for two reasons that turned out to
-// be the same reason. Measured against COL_BG, GColorVividCerulean is 2.6:1 — fine for
-// a ten-pixel band of solid fill, and not fine for the countdown's digits at slot size,
-// which is the other thing this ink draws. GColorCobaltBlue is the same hue two steps
-// down the ramp and 5.0:1, which clears the threshold for text.
-//
-// The second reason is that COL_ACCENT and COL_BAND were the *same* colour, so the one
-// element the face exists to show shared an ink with the strip's decoration and the eye
-// grouped them. Separating the two is what the contrast fix buys on top of legibility.
-#define COL_ACCENT      PBL_IF_COLOR_ELSE(GColorCobaltBlue, GColorBlack)
+#define COL_ACCENT      PBL_IF_COLOR_ELSE(GColorVividCerulean, GColorBlack)
 
-// Appointment bands — one hue for both states, and no longer the clock's hue either;
-// see COL_ACCENT.
+// Appointment bands — one hue for both states.
 //
 // The first pass gave "upcoming" its own pale tint, which failed twice over:
 // GColorCeleste measures far too light to see on white, and any second tint is
