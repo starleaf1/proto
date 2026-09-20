@@ -9,7 +9,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The wire format, decoded back the way `watchface/src/c/wire.c` decodes it.
+ * The wire format, decoded back the way `watchface-digital/src/c/wire.c` decodes it.
  *
  * A packing bug here is invisible on this side and shows up as markers in the wrong
  * place on a watch, so the format is asserted byte by byte rather than round-tripped

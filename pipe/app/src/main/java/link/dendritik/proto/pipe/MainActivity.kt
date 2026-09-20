@@ -4,10 +4,12 @@ import android.Manifest
 import android.companion.AssociationRequest
 import android.companion.BluetoothDeviceFilter
 import android.companion.CompanionDeviceManager
+import android.content.Context
 import android.content.IntentSender
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.text.format.DateFormat
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -17,11 +19,16 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -29,12 +36,19 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import link.dendritik.proto.pipe.pebble.PebbleSender
 import link.dendritik.proto.pipe.ui.theme.ProtoPipeTheme
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import java.util.Date
 
 /**
  * Diagnostics, and the three grants the hosts cannot get for themselves.
@@ -71,9 +85,11 @@ class MainActivity : ComponentActivity() {
                         notificationsGranted = notificationsGranted,
                         associated = associated,
                         canAssociate = Build.VERSION.SDK_INT >= MIN_COMPANION_SDK,
+                        fallbackCapped = Build.VERSION.SDK_INT >= FGS_TIMEOUT_SDK,
                         onGrant = ::ask,
                         onPair = ::pairWatch,
                         onUnpair = ::unpairWatch,
+                        onResync = ::resyncNow,
                     )
                 }
             }
@@ -97,6 +113,11 @@ class MainActivity : ComponentActivity() {
         }
         PipeStatus.calendarGranted = calendarGranted
         PipeStatus.host = hostAhead()
+        // The engine's reconcile() is the only other writer of this, so on screen it can
+        // be a whole tick period out of date — and it is what gates the re-sync button.
+        PipeStatus.watchConnected = PebbleSender.watchConnected(this)
+        // Last press's verdict does not outlive the visit that produced it.
+        PipeStatus.resync = Resync.IDLE
     }
 
     private fun hostAhead(): Host = chooseHost(Build.VERSION.SDK_INT, associated)
@@ -133,6 +154,20 @@ class MainActivity : ComponentActivity() {
             }
             Host.FOREGROUND -> PipeService.start(this)
         }
+    }
+
+    /**
+     * Ask the running engine for an immediate flush.
+     *
+     * Fire and forget — there is no engine reference to call and no result to await, so
+     * the outcome comes back through [PipeStatus.resync], which the engine sets once it
+     * has handled the broadcast. [Resync.REQUESTED] is what is left if nothing does: the
+     * button is only enabled while `PipeStatus.running`, but the host can be torn down
+     * between the check and the press.
+     */
+    private fun resyncNow() {
+        PipeStatus.resync = Resync.REQUESTED
+        PipeEngine.requestResync(this)
     }
 
     // ---------------------------------------------------------------------------
@@ -195,10 +230,15 @@ private fun StatusScreen(
     notificationsGranted: Boolean,
     associated: Boolean,
     canAssociate: Boolean,
+    fallbackCapped: Boolean,
     onGrant: () -> Unit,
     onPair: () -> Unit,
     onUnpair: () -> Unit,
+    onResync: () -> Unit,
 ) {
+    val scope = rememberCoroutineScope()
+    var spinning by remember { mutableStateOf(false) }
+
     Column(
         modifier = modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -237,7 +277,15 @@ private fun StatusScreen(
                         } else {
                             "Pair the watch to remove the ongoing notification. " +
                                 "Android will then run proto only while the watch is " +
-                                "nearby."
+                                "nearby." +
+                                if (fallbackCapped) {
+                                    " Pairing also lifts the six-hour daily limit " +
+                                        "Android puts on the unpaired host, which " +
+                                        "otherwise stops proto syncing until you open " +
+                                        "it again."
+                                } else {
+                                    ""
+                                }
                         },
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -256,12 +304,60 @@ private fun StatusScreen(
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("Status", style = MaterialTheme.typography.titleMedium)
                 Text("Host: ${PipeStatus.host.name.lowercase()}")
+                if (PipeStatus.capped) {
+                    Text(
+                        "Android has paused this host — it may run six hours a day. " +
+                            "Opening proto resets that; pairing the watch removes it.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
                 StatusRow("Engine running", PipeStatus.running)
                 StatusRow("Watch connected", PipeStatus.watchConnected)
                 if (PipeStatus.host == Host.COMPANION) {
                     StatusRow("Watch present", PipeStatus.watchPresent)
                 }
                 Text("Entries in window: ${PipeStatus.eventCount}")
+                Text("Last sync: ${lastSyncText(LocalContext.current, PipeStatus.lastSyncAtMs)}")
+
+                // Enabled only where a flush can land: syncCalendar returns early with
+                // the link down, so a press in any other state would be a silent no-op.
+                // Disabled rather than hidden — a greyed button under a "Watch
+                // connected: no" row explains itself, and a missing one explains nothing.
+                // The debounce is inside onClick rather than in `enabled` on purpose. A
+                // disabled M3 button drops its content to 38% alpha over a 12% container,
+                // which would leave the spinner and its label almost invisible — and a
+                // spinner nobody can see is the thing SPINNER_MIN_MS exists to prevent.
+                Button(
+                    onClick = {
+                        if (!spinning) {
+                            spinning = true
+                            scope.launch {
+                                onResync()
+                                delay(SPINNER_MIN_MS)
+                                spinning = false
+                            }
+                        }
+                    },
+                    enabled = PipeStatus.running && PipeStatus.watchConnected,
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                ) {
+                    if (spinning) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = LocalContentColor.current,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text(if (spinning) "Re-syncing…" else "Re-sync now")
+                }
+                // The outcome only means something once the spinner is down; until then
+                // it is either stale or the word the spinner is already saying.
+                if (!spinning) {
+                    resyncText(PipeStatus.resync)?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
             }
         }
 
@@ -271,6 +367,32 @@ private fun StatusScreen(
             style = MaterialTheme.typography.bodySmall,
         )
     }
+}
+
+/**
+ * How long the spinner stays up, at minimum.
+ *
+ * Not a timeout, and not an estimate of how long a flush takes. The flush runs
+ * synchronously inside the broadcast's own dispatch on this very thread, so it cannot
+ * animate anything while it works and it is normally over within a frame of the press —
+ * a spinner tied strictly to it would be a flicker nobody could read. This is the
+ * shortest press-to-feedback that reads as an action having been taken, and because the
+ * work finishes inside it, what follows the delay is the outcome rather than a guess at
+ * it. If the flush ever does move off the main thread, this becomes a floor rather than
+ * the whole duration, and nothing here has to change.
+ */
+private const val SPINNER_MIN_MS = 450L
+
+/** A time of day in the user's own format, or an em dash before the first send. */
+private fun lastSyncText(context: Context, atMs: Long): String =
+    if (atMs == 0L) "—" else DateFormat.getTimeFormat(context).format(Date(atMs))
+
+private fun resyncText(state: Resync): String? = when (state) {
+    Resync.IDLE -> null
+    // Still REQUESTED with the spinner down means nothing ever picked the broadcast up.
+    Resync.REQUESTED -> "Nothing answered — no engine is running."
+    Resync.SENT -> "Flushed the window to the watch."
+    Resync.NOTHING_SENT -> "Nothing went out — check the link."
 }
 
 @Composable

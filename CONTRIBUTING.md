@@ -1,21 +1,31 @@
 # Contributing
 
-`proto` is a monorepo with two components that share one protocol. Work inside the
-component you're changing; touch the protocol only when both sides move together.
+`proto` is a monorepo with three components that share one protocol: two Pebble
+watchfaces and the Android companion that feeds both. Work inside the component you're
+changing; touch the protocol only when every side moves together.
 
 ## Repository layout
 
 ```
 proto/
-  watchface/   Pebble watchapp (C, Pebble SDK)
-  pipe/        Android companion (Kotlin, calendar reader)
-  docs/        Architecture + protocol contract
+  watchface-digital/   Pebble watchapp, the left-edge timeline (C, Pebble SDK)
+  watchface-analog/    Pebble watchapp, the analog dial (C, Pebble SDK)
+  pipe/                Android companion (Kotlin, calendar reader)
+  docs/                Architecture + protocol contract
 ```
 
-## Watchface (`watchface/`)
+## Watchfaces (`watchface-digital/`, `watchface-analog/`)
+
+Two separate apps with their own UUIDs, built and installed separately. They share the
+protocol and a design vocabulary, and no code: `events.{c,h}`, `wire.{c,h}`,
+`wbatt.{c,h}`, `tools/grab.py` and `tools/send-demo-events.py` exist in each face
+**by copy**, identical except for that face's visible-window constants. **A fix to the
+decoder or the battery estimate belongs in both.** `tools/make-menu-icon.py` is not a
+copy — it draws that face's own launcher icon.
 
 **Prerequisites:** the [Pebble SDK](https://developer.repebble.com) and its `pebble`
-CLI. Run every command from `watchface/`.
+CLI. Run every command from the face's own directory — never the repo root, and never
+the other face's.
 
 ```sh
 pebble build                             # all three target platforms
@@ -29,16 +39,21 @@ touches the emulator.
 
 **Verify UI changes with a screenshot.** After changing anything visual, build,
 install and screenshot the emulator before considering the change done — and do it on
-`flint` as well as a colour platform. Most of the design's prominence cues exist
+`flint` as well as a colour platform, and on `gabbro` too if the layout is shape-aware. Most of the design's prominence cues exist
 specifically so that the black-and-white platform still works, and a change that reads
 beautifully on `gabbro` can be invisible on `flint`.
 
-**Seed the calendar with `watchface/tools/send-demo-events.py`.** It packs the
+**Seed the calendar with the face's own `tools/send-demo-events.py`.** It packs the
 `CalEvents` blob and sends it to a running watchface, covering every marker case — a
-running band across the pointer, two overlapping bands that must flatten, two point
-entries too close to draw apart, an overdue reminder above the pointer, a marker sitting
-on top of a band, and one entry past the horizon that must not draw. `--clear` and
-`--remove` drive the flush and delta paths.
+running appointment, two overlapping bands that must flatten, two point entries too
+close to draw apart, an overdue reminder behind now, a marker sitting on top of a band,
+and one entry past the horizon that must not draw. `--clear` and `--remove` drive the
+flush and delta paths. The script reads the UUID out of the `package.json` beside it, so
+it always targets the face it ships with.
+
+**With two faces installed, an emulator showing the wrong one is the first thing to
+suspect when a send appears to do nothing** — a message addressed to a UUID nothing is
+running is NACKed silently.
 
 `PROTO_DEMO=1 pebble build` compiles the same set in, for tooling older than
 pebble-tool 5.0.39, which is where `send-app-message --bytes` arrived. Keep
@@ -74,16 +89,25 @@ shows up as markers in the wrong place on a watch.
 ## Changing the protocol
 
 1. Update `docs/protocol.md`.
-2. Change **both** `watchface/` and `pipe/` in the same commit.
+2. Change **all three** of `watchface-digital/`, `watchface-analog/` and `pipe/` in the
+   same commit.
 3. Keep the numeric key ids in `pipe/.../protocol/Protocol.kt` in sync with
-   `watchface/build/appinfo.json`. Android addresses keys by integer and never sees
-   the names.
-4. **Append** new keys to `messageKeys` in `watchface/package.json` — ids are
-   positional from 10000, so inserting one silently renumbers everything after it.
-5. Run `pebble clean` after adding a key, or the new `MESSAGE_KEY_*` symbol comes back
-   undeclared.
+   `watchface-digital/build/appinfo.json`. Android addresses keys by integer and never
+   sees the names.
+4. **Append** new keys to `messageKeys` in **both** faces' `package.json` — ids are
+   positional from 10000, so inserting one silently renumbers everything after it, and
+   the two faces must declare the same array in the same order.
+5. Run `pebble clean` in each face after adding a key, or the new `MESSAGE_KEY_*` symbol
+   comes back undeclared.
 6. Check the buffer arithmetic in `docs/protocol.md` still holds. An oversized
    AppMessage is not truncated — it fails to transmit entirely.
+7. Run `cd pipe && ./gradlew test`. `ProtocolTest` reads both `package.json`s and fails
+   if the companion stops addressing a face or the key order drifts — the one mismatch
+   that is otherwise silent, since a send to an unknown UUID is NACKed and logged as a
+   success.
+
+**A new watchface** is the same checklist minus the wire: give it a fresh UUID, add it
+to `Protocol.APP_UUIDS`, and add its directory to `ProtocolTest.faces`.
 
 ## Conventions
 
@@ -94,12 +118,14 @@ shows up as markers in the wrong place on a watch.
   on two of three platforms, so it may reinforce a distinction but never carry it
   alone.
 - **Match the surrounding code.** Follow the existing style, naming and comment
-  density in each component (`watchface/src/c/strip.c` is the reference for C).
+  density in each component (`watchface-digital/src/c/strip.c` and
+  `watchface-analog/src/c/dial.c` are the references for C).
 - **Comment the decisions, not the code.** Several things in here look like bugs and
-  are not — the pointer drawing last, an upcoming band being shallower rather than
-  lighter, the strip curving on `gabbro` and running straight elsewhere. Each has a note saying what
-  was tried and why it failed. Keep that up.
-- **Don't commit build output.** `watchface/build/`, `*.pbw` and Android/Gradle
+  are not — the digital face's pointer drawing last and the analog face's disc drawing
+  over its hands, an upcoming band being shallower rather than lighter, the strip curving
+  on `gabbro` and running straight elsewhere. Each has a note saying what was tried and
+  why it failed. Keep that up.
+- **Don't commit build output.** `watchface-*/build/`, `*.pbw` and Android/Gradle
   artifacts are gitignored and regenerable.
 - **Keep commits scoped to one component** where possible; protocol changes are the
   deliberate exception.

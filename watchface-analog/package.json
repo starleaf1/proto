@@ -1,0 +1,56 @@
+{
+  "name": "proto-analog",
+  "author": "MakeAwesomeHappen",
+  "version": "1.0.0",
+  "keywords": [
+    "pebble-app"
+  ],
+  "private": true,
+  "dependencies": {},
+  "pebble": {
+    "displayName": "Proto Analog",
+    "uuid": "bd9bd299-527e-4236-8206-27be3dc9781c",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "targetPlatforms": [
+      "flint",
+      "emery",
+      "gabbro"
+    ],
+    "watchapp": {
+      "watchface": true
+    },
+    "messageKeys": [
+      "Heartbeat",
+      "CalEvents",
+      "CalFlags",
+      "NavManeuver",
+      "NavDistance",
+      "NavUnit",
+      "PhoneBattery"
+    ],
+    "resources": {
+      "media": [
+        {
+          "type": "bitmap",
+          "name": "MENU_ICON",
+          "file": "images/menu_icon_bw.png",
+          "memoryFormat": "1Bit",
+          "menuIcon": true,
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "MENU_ICON",
+          "file": "images/menu_icon_color.png",
+          "targetPlatforms": [
+            "emery",
+            "gabbro"
+          ]
+        }
+      ]
+    }
+  }
+}

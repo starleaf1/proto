@@ -1,20 +1,31 @@
 # Watch ↔ phone protocol
 
-The complete contract between the Pebble watchface (`watchface/`) and the Android
-companion (`pipe/`). Both sides must agree on every value here, and both change in
-the same commit.
+The complete contract between the Pebble watchfaces (`watchface-digital/`,
+`watchface-analog/`) and the Android companion (`pipe/`). Every side must agree on every
+value here, and every side changes in the same commit.
 
 ## Identity
 
 | Property | Value | Source |
 | --- | --- | --- |
-| App UUID | `f2fc68a6-9636-4694-929b-73c11c33f0e4` | `watchface/package.json` |
-| SDK version | `3` | `watchface/package.json` |
+| App UUID, digital | `f2fc68a6-9636-4694-929b-73c11c33f0e4` | `watchface-digital/package.json` |
+| App UUID, analog | `bd9bd299-527e-4236-8206-27be3dc9781c` | `watchface-analog/package.json` |
+| SDK version | `3` | each face's `package.json` |
 | Transport | Pebble AppMessage (Bluetooth) | — |
 | Direction | phone → watch, always | — |
 
-The companion must address messages to this UUID. Change it in exactly one place
-(`package.json`) and rebuild; the value is embedded into the app binary.
+A face's UUID lives in exactly one place (its own `package.json`) and is embedded into
+the app binary at build time. Change it there and rebuild.
+
+**The companion addresses every message to every UUID.** The firmware keys installed
+apps by UUID, so two faces cannot share one, and the protocol has no inbound channel —
+there is nothing for the watch to answer with and `isWatchConnected()` reports the
+*Pebble app's* link state, not which watchapp is in the foreground. So the companion
+cannot know which face is on screen, and does not try: a message addressed to a UUID
+nothing is running is NACKed by the firmware and dropped, which costs one round trip and
+no state. `Protocol.APP_UUIDS` is the list, and `ProtocolTest` asserts it against both
+`package.json`s — the mismatch is otherwise silent, a wrong UUID logging a clean success
+on the phone and delivering nothing.
 
 The watch only ever **reads**. It never replies with app data; its outbox exists only
 for AppMessage's own ACK/NACK bookkeeping.
@@ -22,7 +33,9 @@ for AppMessage's own ACK/NACK bookkeeping.
 ## Message keys
 
 Seven keys. Ids are positional from `10000` in the order the names appear under
-`messageKeys` in `watchface/package.json`.
+`messageKeys` in a face's `package.json`. **Both faces declare the same array in the
+same order**, which is what lets one set of ids serve them both; `ProtocolTest` fails if
+that drifts.
 
 | Key | Id | Type | Meaning |
 | --- | --- | --- | --- |
@@ -38,7 +51,7 @@ Three binding styles, one set of ids:
 
 - **Watch (C):** by symbol — `MESSAGE_KEY_Heartbeat`, `MESSAGE_KEY_CalEvents`, …
 - **PebbleKit Android:** by **numeric id**. Android never sees the names, so the
-  integers must match `watchface/build/appinfo.json`. They live in one place,
+  integers must match `watchface-digital/build/appinfo.json`. They live in one place,
   `pipe/.../protocol/Protocol.kt`.
 - **PebbleKit JS:** by name. The `src/pkjs/index.js` stub sends nothing — it exists
   only because the build requires a JS entry point, and anything it sent would race
@@ -78,7 +91,8 @@ dropped.
 - **On connect**, and whenever the companion cannot know what the watch holds, it
   sends a **flush**: `CalFlags` has `FLUSH` set on the first message, and the watch
   drops its whole table before applying the records. This is the only path that
-  recovers from a watchface relaunch, because the watch persists no events.
+  corrects a watchface's own restored table — the watch keeps its entries across a
+  relaunch, but it cannot learn what changed while it was not running.
 - **Otherwise** the companion sends only the difference — upserts for entries that
   are new or changed, removes for entries that have left the scan — with
   `CalFlags = 0`.
@@ -180,12 +194,18 @@ Five rules:
 - **The companion declares its own cadence.** `Heartbeat` carries *seconds until the
   next check-in*, not a ping token, so neither side hardcodes a constant and the
   companion can change tier without a watchface update.
-- **The watch allows 2.5 periods** before raising the alert. One missed beat is
-  ordinary on a scheduler Android throttles; two in a row is a dead companion.
+- **The watch allows three periods** before raising the alert, which is the companion's
+  own retry ladder read from the other end. The slow tier ticks at 600 s and backs a
+  failed flush off to 1200 s before trying again, so a single miss puts the next real
+  attempt 1800 s out — and alerting sooner than that would be alerting while the
+  companion is still visibly working the problem. Three periods is exactly where "it
+  missed one and the retry missed too" begins, and that is a dead companion rather than a
+  throttled one. It was 2.5 periods against a 900 s tier that had no retry to account
+  for; note the absolute grace got *shorter* in the change, 1800 s against 2250.
 - **Before the first heartbeat the watch assumes life.** A watchface relaunch raises
   no event the phone can see, so starting with the alert up would flash
   "companion down" after every excursion into another app. It starts on the slow
-  tier's grace (900 s × 2.5).
+  tier's grace (600 s × 3).
 - **A verdict does not survive a Bluetooth gap.** On reconnect the watch clears
   "dead" and resets to the default grace — the companion was never given a chance to
   check in, and a 30 s navigation cadence must not be inherited into a reconnect where
@@ -195,34 +215,62 @@ Five rules:
 
 | State | Period | Watch alerts after | Scheduler |
 | --- | --- | --- | --- |
-| Navigating | **30 s** | 75 s | `Handler.postDelayed` |
-| Everything else | **900 s** (15 min) | ~37 min | the companion's one `setAndAllowWhileIdle` tick |
+| Navigating | **30 s** | 90 s | `Handler.postDelayed` |
+| Everything else | **600 s** (10 min) | 30 min | the companion's one `setAndAllowWhileIdle` tick, backing off to 3600 s while sends fail |
 
 Navigation is the only state that earns the fast tier, and it is also the one state
 where the device is definitely interactive, so a plain handler post fires on time and
 costs nothing.
 
-Everything else has to ride the slow tier: in Doze the system throttles
-`setAndAllowWhileIdle` to roughly one alarm per 9–15 minutes per app, so a nominally
-faster cadence would not be delivered and the watch would raise a companion-down alert
-every night. 15 minutes is also the practical floor for any Android app without a
-foreground service — `setExactAndAllowWhileIdle` needs `SCHEDULE_EXACT_ALARM`, which
-Android 14 no longer grants by default, and `WorkManager`'s periodic minimum is 15
-minutes regardless.
+Everything else has to ride the slow tier, and its period is set by the platform rather
+than by taste. Doze allows `setAndAllowWhileIdle` to fire **no more than once per nine
+minutes, per app**; the power-management tables state the same limit as seven while-idle
+alarms an hour. 600 s is six an hour — inside that budget with one alarm spare, and
+inside the ten an hour the working-set standby bucket allows. A nominally faster cadence
+would simply not be delivered, and an undelivered cadence is worse than a slow one: the
+watch would alert every night on a promise the phone cannot keep.
+
+Below Working set the buckets get tighter than this tick needs. Frequent allows two
+alarms an hour and Rare one, against the six 600 s asks for. A companion held open by a
+foreground service or bound on companion-device presence should sit in Active or Working
+set, but that is a claim about a particular device and release rather than a guarantee —
+`adb shell am get-standby-bucket link.dendritik.proto.pipe` is how to settle it, on the
+same device that settles whether the companion binding holds at all.
+
+Neither escape hatch is available. `setExactAndAllowWhileIdle` needs
+`SCHEDULE_EXACT_ALARM`, which Android 14 no longer grants by default and which Play
+reserves for actual alarm-clock apps; `WorkManager`'s periodic minimum is fifteen
+minutes, which is slower than what this already has.
+
+**A tick whose flush does not land backs the next one off** — 600, 1200, 2400, then a
+3600 s cap — and the first send that gets through from any path resets it, including a
+delta off a calendar edit and the flush on reconnect. Nothing is queued and nothing is
+resent: the next tick rescans the whole window regardless, so what backs off is how hard
+the companion tries, not a message it is holding on to. Backoff only ever lengthens the
+delay, so it cannot breach the budget above, and against a watch that is not listening it
+is the difference between six pointless wake-ups an hour and one. The cap is the largest
+period the protocol lets `Heartbeat` carry, which is not a coincidence.
+
+**The watch is told the base period throughout, never the backed-off one.** A backed-off
+period could only be declared by a message that arrived, and a message arriving is what
+ends the backoff — so the base is the only period the watch can coherently be given.
+While the retries are failing the watch is *supposed* to notice, and three periods is
+when it does.
 
 **That throttle is per app, not per alarm, which is why the slow tier is not a
 scheduler of its own.** The companion already needs one periodic wake-up to re-scan the
 six-hour window, and a second alarm at the same period would not buy a second wake-up —
-it would queue behind the first for one budget and make both late, spending the 2.5-period
-grace on self-inflicted contention. So there is exactly one alarm: it re-scans, sends the
+it would queue behind the first for one budget and make both late, spending the
+three-period grace on self-inflicted contention. So there is exactly one alarm: it re-scans, sends the
 delta if there is one, and speaks a bare heartbeat only if there was not. Since any
 arrival is proof of life, a tick that sent a delta has already beaten.
 
 A payload sent shortly *before* a tick also counts, so the beat is suppressed if
 anything went out in the last 60 s. That guard is deliberately far shorter than the
 period: the tick cadence is fixed, so a beat skipped at one tick moves the next message
-a full period out, and suppressing for 900 s could put 1800 s plus a Doze-slipped tick
-between messages — past the grace, raising the alert it was trying to avoid.
+a full period out, and suppressing for the whole 600 s could put 1200 s plus a
+Doze-slipped tick between messages — two thirds of the grace spent to save one four-byte
+message.
 
 Note what this does **not** affect: latency. A real change is pushed the moment it
 happens; the `ContentObserver` fires, the scan runs and the delta goes out
@@ -264,15 +312,31 @@ it knows.
 
 ## Delivery rules
 
-- **Send on change, not on a timer** — with the heartbeat as the sole exception, and it
-  rides the same periodic tick as the window re-scan rather than a timer of its own.
+- **Send on change, not on a timer** — with two exceptions, both riding the same
+  periodic tick rather than a timer of their own.
+
+  The first is the heartbeat, which has nowhere else to live.
+
+  The second is that **the tick sends a full flush rather than a delta.** Switching
+  watchface does not drop the Bluetooth link, so nothing signals it, and every delta
+  sent while a face was not running went to a UUID that NACKed it. The face restores its
+  own table on launch, so the swap is no longer a blank timeline — but that table is as
+  of the last time that face was on screen, and nothing on the watch can reconcile it.
+  With two faces installed, switching between them is the ordinary thing to do, so the
+  periodic re-flush is what makes the swap self-healing — worst case one period of a
+  stale marker rather than one period of an empty window. It costs `6 + 24 × 12 = 294`
+  payload bytes against a bare heartbeat's four, once per period. The change-driven path
+  still sends a delta; this exception is the tick's alone.
 - **Put `Heartbeat` in every message**, which is what makes ordinary traffic a life sign
   and lets the tick stay silent when it has just sent a delta.
 - **Say nothing while Bluetooth is down.**
 - **Send absolute values**, never deltas, for everything except the calendar — and
   there, a diff is only ever sent against a table the companion knows it flushed.
-- **Flush on reconnect.** The watch persists nothing; every value resets when the
-  watchface launches or the watch reboots.
+- **Flush on reconnect.** Every scalar resets when the watchface launches or the watch
+  reboots — nav, the phone battery, the declared cadence. The calendar table is the one
+  thing that survives a relaunch, and it survives as the watch's *own* memory of the
+  last thing it was told, which the companion has no way to read back; a diff against
+  it would be a diff against a phantom.
 - **Clamp** before sending: percentages to `0`–`100`, distances to `>= 0`, durations
   to `0`–`65535`.
 - **Coalesce the scalars.** A burst of nav or battery updates collapses to one send
@@ -287,7 +351,7 @@ it knows.
 
 ## Versioning
 
-Any change to the UUID, a key's name, id or type, the blob layout, or the buffer sizes
+Any change to a UUID, a key's name, id or type, the blob layout, or the buffer sizes
 is a breaking change, and must be made on **both** sides in the same change set. There
 is no version negotiation; the blob's `version` byte exists so the watch can ignore a
 companion it does not understand rather than misread it.
@@ -296,19 +360,20 @@ companion it does not understand rather than misread it.
 
 Every key is drivable from the command line. The `int32` ones go directly through
 `pebble send-app-message`; the `CalEvents` blob is packed by
-`watchface/tools/send-demo-events.py`, which is also the reference for the layout above
-in a language you can read a hexdump in.
+each face's own `tools/send-demo-events.py`, which is also the reference for the layout
+above in a language you can read a hexdump in. The script reads the UUID out of the
+`package.json` beside it, so it always targets the face it ships with.
 
 ```sh
-# the demo calendar: a flush, then eight records covering every marker case
-watchface/tools/send-demo-events.py --emulator flint
+# the demo calendar: a flush, then the records covering every marker case
+watchface-analog/tools/send-demo-events.py --emulator flint   # or watchface-digital/
 
 # turn right in 250 m, on the fast heartbeat tier
 pebble send-app-message --emulator flint --vnc --int 10003=3 10004=2500 10005=0 10000=30
 
 # phone battery at 28% (the watch's threshold is 30)
-pebble send-app-message --emulator flint --vnc --int 10006=28 10000=900
+pebble send-app-message --emulator flint --vnc --int 10006=28 10000=600
 
-# declare a 15 s cadence, then stay quiet: the companion-down alert appears in ~38 s
+# declare a 15 s cadence, then stay quiet: the companion-down alert appears in ~45 s
 pebble send-app-message --emulator flint --vnc --int 10000=15
 ```

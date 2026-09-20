@@ -65,7 +65,7 @@ You can see which one is in use, and undo the pairing, from the app's status car
 ```
 calendar changed ─┐
 watch reconnected ─┼──► PipeEngine.reconcile ──► CalendarSource.query
-15 minutes passed ─┘                                      │
+10 minutes passed ─┘                                      │
                                                           ▼
                                             EventDiff ──► EventBlob ──► PebbleSender
 ```

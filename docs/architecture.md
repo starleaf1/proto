@@ -1,17 +1,30 @@
 # Architecture
 
-`proto` is two programs that cooperate over Bluetooth:
+`proto` is three programs that cooperate over Bluetooth — two watchfaces and the one
+companion that feeds them both:
 
 ```
-┌────────────────────────────┐            AppMessage             ┌──────────────────────────┐
-│  Phone companion           │  Heartbeat, CalEvents, CalFlags,  │  Pebble watchface        │
-│  (pipe/ — Android)         │  NavManeuver/Distance/Unit,       │  (watchface/)            │
-│  reads the calendar and    │  PhoneBattery                     │  draws a four-hour       │
-│  the phone's battery       │  (phone → watch)                  │  timeline down the left  │
-│                            │  ───────────────────────────────► │  edge, plus a clock and  │
-│                            │   on change, plus a liveness beat │  three rows beside it    │
-└────────────────────────────┘                                   └──────────────────────────┘
+                                                  ┌──────────────────────────────────┐
+                                               ┌─►│ watchface-digital/               │
+┌──────────────────────────────┐  AppMessage   │  │ a four-hour timeline down the    │
+│ Phone companion              │  Heartbeat,   │  │ left edge, plus a clock and      │
+│ (pipe/, Android)             │  CalEvents,   │  │ three rows beside it             │
+│                              │  CalFlags,    │  └──────────────────────────────────┘
+│ reads the calendar and the   │───────────────┤
+│ phone's battery, and         │  Nav*, Phone  │  ┌──────────────────────────────────┐
+│ addresses every message to   │  Battery      └─►│ watchface-analog/                │
+│ both UUIDs                   │                  │ a six-hour timeline round the    │
+└──────────────────────────────┘  on change,      │ rim of an analog dial, with      │
+                                  plus a          │ the date and the countdown       │
+                                  liveness beat   │ at the centre                    │
+                                                  └──────────────────────────────────┘
 ```
+
+The two faces are independent apps with their own UUIDs, built and installed separately.
+They share the protocol and a design vocabulary — an appointment is a band, a task is a
+blunt wedge, a running thing is twice the depth of an upcoming one, red is spent on now
+— and no code that knows about pixels. The three modules that do not (`events`, `wire`,
+`wbatt`) exist in both by copy.
 
 The dividing line: **the phone decides meaning, the watch decides pixels.** The
 companion resolves which entries exist, when they start, how long they run, and
@@ -19,22 +32,48 @@ whether one is an appointment or a reminder. The watch turns that into bands,
 wedges and colours. No colour crosses the wire, because the companion cannot know
 which watch model is on the other end — and one of the three is black-and-white.
 
-## What the face answers
+## What the faces answer
 
 Not "how many things are waiting for me" — that was the previous design, and it needed
-a notification listener to count things. This one answers **"what are my next few
-hours, and is anything wrong right now"**.
+a notification listener to count things. Both of these answer **"what are my next few
+hours, and is anything wrong right now"**. They differ in what they make cheap to read.
+
+Shared by both:
+
+- **Appointments are bands** spanning their duration; **tasks and reminders are blunt
+  wedges** at their exact position, merged only where two would overlap.
+- **A running thing is twice the depth of an upcoming one.** Depth, not density and not
+  hue, because depth is a shape and works on a display with one ink.
+- **The countdown** counts down to whatever is next, or up through whatever is running —
+  and the sign in front of the digits is what says which: `-` before it starts, `+`
+  once it has.
+- **Nav, then warnings**, each drawn only when it has something to say.
+- **Nothing else is drawn.** An idle face is the timeline, the clock and the date.
+
+`watchface-digital/` — **now is fixed and the calendar moves:**
 
 - **The strip is a four-hour timeline down the left edge**, later always lower: one hour
   above the pointer, three below, notched every fifteen minutes with the hours thicker.
-  Appointments are bands spanning their duration; tasks and reminders are wedges at their
-  exact position, merged only where two would overlap.
 - **The pointer never moves.** It sits at the quarter mark and the ruler scrolls past it.
 - **The clock is plain digits**, level with the pointer, honouring the 12/24-hour setting.
-- **The countdown** counts down to whatever is next, or up through whatever is running —
-  and a progress bar under the digits is what says which.
-- **Nav, then warnings**, stacked below, each drawn only when it has something to say.
-- **Nothing else is drawn.** An idle face is the strip, the clock, and the date.
+- The date, the countdown, nav and the warnings stack downward beside the strip.
+
+`watchface-analog/` — **the calendar is fixed and now moves:**
+
+- **The ring is a six-hour timeline round the rim** — one hour behind, five ahead — with
+  each entry at the clock angle of its own time, so a three o'clock meeting is at the 3.
+  A rail spans the window and stops at an end cap; past it, the ring is not empty, it is
+  not being shown. With nothing inside the window the rail goes too, leaving a plain
+  analog clock rather than an empty scale.
+- **There is no now mark.** Six hours over half a turn is thirty degrees to the hour,
+  which is the hour hand's own rate, so the hand points at the present position on the
+  timeline by construction. It stops three pixels short of the ring and never enters it:
+  the markers have one lane and the hand does not compete for it.
+- **The twelve dial ticks are the ring's scale as well as the clock's.** Graduating the
+  ring separately would put two scales in two concentric lanes.
+- **The date and the countdown sit in a disc at the centre**, drawn over the hands. It
+  covers the half of each hand that carries no reading, and it is the only place on that
+  face where text is safe from a hand at every minute of the day.
 
 ## Certainty, restated
 
@@ -52,7 +91,7 @@ and those are never gated on anything.
 
 ## Components
 
-### `watchface/` — the Pebble watchapp
+### `watchface-digital/` — the left-edge timeline
 
 One window, one layer, one update proc, split across seven small modules.
 
@@ -60,7 +99,7 @@ One window, one layer, one update proc, split across seven small modules.
 | --- | --- |
 | `proto.c` | Lifecycle, the service handlers, and the paint order. |
 | `geometry.{c,h}` | The track, and the vertical layout. |
-| `theme.h` | The whole palette and the three font choices. |
+| `theme.h` | The whole palette and the four system-font choices. |
 | `events.{c,h}` | The event table, the live window, the linger rules, and which entry the countdown should show. |
 | `strip.{c,h}` | Bands, notches, markers, the pointer. |
 | `slots.{c,h}` | The three conditional rows, and every glyph. |
@@ -118,6 +157,65 @@ Identical on a rectangle; on `gabbro` the ray runs down and to the right, so the
 sits a dozen pixels below that point and levelling the clock with the apex reads as
 floating above it.
 
+### `watchface-analog/` — the analog dial
+
+One window, one layer, one update proc, split across the same shape of module set.
+
+| Module | Owns |
+| --- | --- |
+| `proto.c` | Lifecycle, service handlers, paint order, the demo seed. |
+| `dial.{c,h}` | The rail, the bands, the wedges, the ticks and the hands. |
+| `geometry.{c,h}` | The radial ladder, the angle mapping, the disc's rows. |
+| `theme.h` | The palette and the two system-font choices. |
+| `events.{c,h}` | The event table, the live window, linger rules, countdown choice. |
+| `slots.{c,h}` | The countdown and the two notification pairs, and every glyph. |
+| `wire.{c,h}` | The AppMessage inbox and the two watchdogs. |
+| `wbatt.{c,h}` | The watch's own hours-remaining estimate. |
+
+`events`, `wire` and `wbatt` are the digital face's files, copied. They carry no
+rendering knowledge; the only difference is the window, which is 1 h and 5 h here
+against 1 h and 3 h there.
+
+**Everything is polar, and there is one angular scale.** `angle_of_time()` maps a
+wall-clock instant to a dial angle — `((minutes % 720) * TRIG_MAX_ANGLE) / 720`, into
+trig units with no intermediate degrees, because a whole degree is two minutes of the
+ring and 2.2 px of `gabbro`'s rim. Six hours is 360 minutes over half a turn, so the ring
+runs at exactly the hour hand's rate and the hand needs no explanation.
+
+No cosine correction anywhere: every marker is square to a true circle on all three
+platforms, so a depth in pixels is already perpendicular to the boundary. The old dial
+that preceded the digital face did need one — that was a rectangle's angled ray.
+
+**Bands** use the same representation as the strip's: `uint8_t coverage[361]`, one byte
+per minute of the window. Per *degree* would be the tempting symmetry and is the wrong
+way round — two minutes share a degree, and `gabbro` would lose a pixel of placement.
+
+**Every angle is a base plus a span, never a fresh absolute.** The window is half a turn
+and rides with the hour hand, so it straddles twelve o'clock for six hours out of every
+twelve. Reducing both ends mod a turn independently puts the end behind the start, and
+`graphics_fill_radial` draws nothing when the start is the larger — a third of the day
+would render blank. `fill_ring_band()` normalises the start, carries the span, and splits
+at the boundary.
+
+**The hands** are tapered quads with a background halo *and a stroked spine*, told apart
+by width because `flint` has nothing else. The spine is not decoration: a quad three
+pixels across does not survive `gpath_draw_filled`, which rasterises by scanline and
+drops whole scanlines from a slanted sliver — measured on `flint`, the minute hand did
+not draw at all for sixteen minutes of every hour, at slopes rather than directions. A
+stroked line is a different rasteriser and is continuous at every angle. The minute hand runs to the rim; the hour hand stops three
+pixels short of the ring, so the marker lane stays the markers' alone.
+The halo is a grown filled polygon, never a wide stroked outline — a miter at a sharp
+vertex overshoots far enough to cut a background-coloured slot through a band.
+
+**The disc** is drawn last of the dial, over both hands, and its size is solved rather
+than chosen: each row is a rectangle inscribed in a circle, so the binding corner is the
+far one and the radius is the largest of those corners' distances plus a pad. That comes
+out at 34 px on `flint`, 44 on `emery` and 65 on `gabbro` from the same four lines, and
+it moves on its own when a font size does — which is how dropping the countdown's
+progress bar shrank it, and how moving from subsetted TTFs to the firmware's own Gothic
+moved it again. Gothic is wider per row and shorter per row than the condensed face it
+replaced, and on `emery` those cancel exactly.
+
 ### `pipe/` — the Android companion
 
 Kotlin + Jetpack Compose, `namespace link.dendritik.proto.pipe`.
@@ -126,7 +224,7 @@ Kotlin + Jetpack Compose, `namespace link.dendritik.proto.pipe`.
 | --- | --- |
 | `PipeEngine` | Everything with a lifecycle, and no opinion about what keeps the process alive. |
 | `PipeCompanionService` | The host. Bound by the system while the associated watch is nearby. |
-| `PipeService` | The fallback host: a foreground service, and the notification that costs. |
+| `PipeService` | The fallback host: a foreground service, the notification that costs, and Android 15's six-hour cap on it. |
 | `PipeHost` | `chooseHost`, and the `CompanionDeviceManager` calls around it. |
 | `CalendarSource` | Queries `CalendarContract.Instances` over the window the watch can draw. |
 | `CalendarWatcher` | `ContentObserver` plus `ACTION_PROVIDER_CHANGED`. |
@@ -134,6 +232,8 @@ Kotlin + Jetpack Compose, `namespace link.dendritik.proto.pipe`.
 | `EventBlob` / `EventDiff` | Pure. Packing and diffing, covered by JVM unit tests. |
 | `PebbleSender` | Debounce, coalesce, dedup, chunk, and the heartbeat the tick owes. |
 | `BootReceiver` | Restarts the service after a reboot. |
+| `MainActivity` | The three grants the hosts cannot get themselves, the pairing dialog, the diagnostics and the manual re-sync. |
+| `PipeStatus` | Observable diagnostics. Written by everything, read only by the screen. |
 
 Framework types stop at `CalendarSource`. Everything below it sees `EventFacts`, which
 is what lets the whole wire format be tested with no device and no Robolectric — the
@@ -168,29 +268,57 @@ process is warm, so the alarm behaves exactly as it does under the foreground se
 Going notification-free cost nothing on the wire — same keys, same declared cadence, the
 watchface untouched.
 
+**The fallback is now the worse host for a second reason.** Since Android 15 a `dataSync`
+foreground service may run six hours in any 24, after which the platform calls
+`Service.onTimeout` and kills the process with a `RemoteServiceException` if it does not
+stand down; it then refuses to start another until the user next opens the app, and will
+not launch one from `BOOT_COMPLETED` at all. `PipeService` handles all three, and the
+recovery is the one the platform documents — foregrounding the app resets the budget, and
+`maybeStart` already runs on every resume. Nothing retries in the background, because the
+budget is spent and a self-restarting service would only be refused again.
+
+Note who this can reach: API 35 is well above `MIN_COMPANION_SDK`, so every device that
+can hit the cap could have been on the companion host instead. The affected population is
+exactly the users who declined the pairing dialog, which is why the pairing card is where
+the app says so.
+
 ## Data flow
 
-1. Something happens: the calendar changed, the watch reconnected, or fifteen minutes
-   passed and the six-hour window slid forward. All three land on one method,
-   `PipeEngine.reconcile`.
+1. Something happens: the calendar changed, the watch reconnected, ten minutes passed
+   and the six-hour window slid forward, or the user pressed **Re-sync now** on the
+   diagnostics screen. All four land on one method, `PipeEngine.reconcile`.
+
+   The fourth is the only one that is not a change, and the only one that comes from
+   outside the engine. Nothing holds a reference to a live `PipeEngine` — both hosts keep
+   it in a private field — so the button broadcasts an action the engine registers at
+   runtime, alongside the tick's. Runtime registration is load-bearing in both
+   directions: the system cannot restart a dead process to service the press, so a press
+   with nothing running is dropped rather than answered by an engine that has just come
+   up knowing nothing. It sends the same flush the tick sends and deliberately leaves the
+   alarm alone, because re-arming on a press would slide the declared cadence a full
+   period.
 2. `CalendarSource` scans `[now − 2 h, now + 6 h]`, excluding whole-day entries — they
    have no position on a timeline and no duration that would fit one — and anything
    cancelled. Duration comes from `END - BEGIN`; a zero-length instance is a reminder.
 
-   The phone's window is deliberately wider than the strip's `[now − 1 h, now + 3 h]`.
-   Entries past the horizon sit in the watch's table undrawn and scroll into view as the
-   window slides, which costs one message instead of one per quarter hour.
+   The phone's window is deliberately wider than either face's — `[now − 1 h, now + 3 h]`
+   on the digital one and `[now − 1 h, now + 5 h]` on the analog one. Entries past a
+   face's horizon sit in its table undrawn and come into view as the window slides,
+   which costs one message instead of one per quarter hour, and one scan serves both.
 3. `EventDiff` compares the scan against what the companion believes the watch holds.
    A reconnect skips the diff and sends a **flush** instead, because a watchface that
    relaunched holds nothing.
 4. `EventBlob` packs the records, twenty-four per message, and `PebbleSender` sends
-   them with `FLUSH`/`MORE` framing and a `Heartbeat`.
+   them with `FLUSH`/`MORE` framing and a `Heartbeat` — to every UUID in
+   `Protocol.APP_UUIDS`, because there is no inbound channel to learn which face is on
+   screen. A send to a UUID nothing is running is NACKed and dropped.
 5. `wire.c` decodes, upserts and removes against a fixed 32-slot table, and marks the
    layer dirty.
 6. The next paint recomputes the coverage array from scratch and draws it. Every
    marker's position, prominence and existence is a function of `now`, so the minute
-   tick is also what advances the countdown, scrolls the ruler past the pointer, and
-   retires whatever has aged out.
+   tick is also what advances the countdown and retires whatever has aged out — and it
+   is the whole of the motion on both faces, the digital one sliding its ruler past a
+   pinned pointer and the analog one sweeping its window past markers that hold still.
 
 Steps 1–6 are the change path, and how fast a change arrives is governed by the
 `ContentObserver`: the scan and the send happen synchronously off it, so a calendar edit
@@ -198,11 +326,22 @@ reaches the watch in about as long as a `CalendarContract.Instances` query takes
 
 Underneath that, one periodic tick does the two jobs that need a clock, and it is a
 single `setAndAllowWhileIdle` alarm because Doze throttles that call per app rather than
-per alarm — a second one at the same period would only make the first late. So the tick
-re-scans the slid window, sends the delta if there is one, and otherwise speaks a bare
-heartbeat. Proving liveness needs no separate loop, because **any message arriving is the
-proof**; the `Heartbeat` key exists so a companion with no news can still say something.
-If the watch hears nothing for 2.5 declared periods, the bottom row says so.
+per alarm — a second one at the same period would only make the first late. Its 600 s is
+the platform's number rather than a preference: Doze allows a while-idle alarm no more
+than once per nine minutes per app, so six an hour is the budget with one to spare. So
+the tick re-scans the slid window and sends a **flush**, not a delta — the one place this
+companion speaks on a timer with nothing new to say. Switching watchface does not drop
+the Bluetooth link, so nothing signals it, and every delta sent while a face was off
+screen went to a UUID that NACKed it — the face restores its own table at launch, but
+only as of the last time it was running; with two faces installed the swap is the
+ordinary thing to do, and the re-flush is what makes it self-healing. A bare heartbeat is
+what is left for when the send fails outright, and a tick whose flush did not land doubles
+the next one's delay — 600, 1200, 2400, capped at 3600 — until something gets through.
+Proving liveness needs no separate loop, because **any message arriving is the proof**;
+the `Heartbeat` key exists so a companion with no news can still say something. If the
+watch hears nothing for three declared periods, the bottom row says so — three because
+that is one missed tick plus the backed-off retry behind it, which is the point at which
+the silence stops being a throttled scheduler and starts being a dead companion.
 
 **Calendar content never leaves the phone.** Titles, locations, attendees and
 descriptions are never read. The watch receives a position, a duration and two enum
@@ -210,7 +349,8 @@ bytes per entry.
 
 ## Build boundaries
 
-`watchface/` builds with the Pebble SDK (`waf` via the `pebble` CLI); output goes to
-`watchface/build/`, which is generated and gitignored. `pipe/` builds with Gradle
-(`./gradlew assembleDebug`, JDK 21). Each component is self-contained; the only thing
-they share is the protocol.
+Each watchface builds with the Pebble SDK (`waf` via the `pebble` CLI), from its own
+directory and with its own UUID; output goes to `watchface-*/build/`, which is generated
+and gitignored. `pipe/` builds with Gradle (`./gradlew assembleDebug`, JDK 21). Each
+component is self-contained; the only thing all three share is the protocol, and the
+only thing the two faces share beyond it is three presentation-free modules, by copy.

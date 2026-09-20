@@ -73,10 +73,10 @@ class PebbleSender(private val context: Context) {
                     cancelFastBeat()
                     sentNav = null
                     sentBattery = null
-                    // Forget what the watch holds. It persists nothing across a
-                    // watchface relaunch, so on reconnect the only correct move is a
-                    // full flush; pretending we still know its table would send a
-                    // diff against a phantom.
+                    // Forget what the watch holds. It restores its own table across a
+                    // relaunch and the protocol cannot read it back, so on reconnect the
+                    // only correct move is a full flush; pretending we still know its
+                    // table would send a diff against a phantom.
                     sentEvents = emptyMap()
                 } else {
                     Log.i(TAG, "watch connected; re-syncing")
@@ -101,8 +101,7 @@ class PebbleSender(private val context: Context) {
     }
 
     /** True if the Pebble app reports a paired, connected watch. */
-    fun isWatchConnected(): Boolean =
-        runCatching { PebbleKit.isWatchConnected(context) }.getOrDefault(false)
+    fun isWatchConnected(): Boolean = watchConnected(context)
 
     // ---------------------------------------------------------------------------
     // Submissions
@@ -130,9 +129,9 @@ class PebbleSender(private val context: Context) {
      * arriving, not on the `Heartbeat` key specifically. It is deliberately a small
      * window rather than a full period. Suppressing for a whole period could put two
      * periods between messages — the tick cadence is fixed, so a beat skipped at
-     * `k × 900 s` moves the next one to `(k+1) × 900 s` — and 1800 s plus a Doze-slipped
-     * tick would cross the watch's 2.5-period grace and raise a false alert. With the
-     * guard the worst case is 900 s + 60 s against a 2250 s grace.
+     * `k × 600 s` moves the next one to `(k+1) × 600 s` — and 1200 s plus a Doze-slipped
+     * tick would spend most of the watch's three-period grace to save one four-byte
+     * message. With the guard the worst case is 600 s + 60 s against an 1800 s grace.
      */
     fun beat() {
         val silentFor = SystemClock.elapsedRealtime() - lastSentAtMs
@@ -223,14 +222,31 @@ class PebbleSender(private val context: Context) {
         scheduleFastBeat()
     }
 
+    /**
+     * Put one dictionary on the wire, addressed to every face in turn.
+     *
+     * The caches above stay single deliberately. Both faces receive byte-identical
+     * dictionaries from this one path, and a disconnect clears the caches and the
+     * reconnect flushes to both at once, so there is no per-face divergence for a
+     * per-face cache to track.
+     *
+     * The failure mode is per-*dictionary*, not per-UUID: `sendDataToPebble` throws
+     * only for a malformed or oversized dictionary, which would fail for every
+     * address equally. A watch with only one of the two faces installed is not a
+     * failure at all — the other send is NACKed by the firmware and never comes back
+     * here.
+     */
     private fun send(dict: PebbleDictionary): Boolean = try {
-        PebbleKit.sendDataToPebble(context, Protocol.APP_UUID, dict)
+        for (uuid in Protocol.APP_UUIDS) {
+            PebbleKit.sendDataToPebble(context, uuid, dict)
+        }
         lastSentAtMs = SystemClock.elapsedRealtime()
         true
     } catch (e: IllegalArgumentException) {
         // What PebbleKit throws for a malformed or oversized dictionary. Nothing is
-        // marked as sent: the next change or the next heartbeat retries, and the
-        // watch's 2.5-period grace absorbs a single miss without raising an alert.
+        // marked as sent: the next change or the next heartbeat retries, and the watch's
+        // three-period grace absorbs a single miss without raising an alert. If the throw
+        // happened inside a flush, PipeEngine counts it and the next tick backs off.
         Log.w(TAG, "send failed, will retry on next change or heartbeat", e)
         false
     }
@@ -269,11 +285,23 @@ class PebbleSender(private val context: Context) {
         return null
     }
 
-    private companion object {
-        const val TAG = "PebbleSender"
-        const val DEBOUNCE_MS = 250L
+    companion object {
+
+        /**
+         * True if the Pebble app reports a paired, connected watch.
+         *
+         * Here rather than only on the instance because the activity needs the same
+         * answer — it gates the manual re-sync button on it — and it holds no sender.
+         * One definition, so the `runCatching` that absorbs a missing Pebble app is not
+         * written twice.
+         */
+        fun watchConnected(context: Context): Boolean =
+            runCatching { PebbleKit.isWatchConnected(context) }.getOrDefault(false)
+
+        private const val TAG = "PebbleSender"
+        private const val DEBOUNCE_MS = 250L
 
         /** How recently a payload counts as having already served as the beat. */
-        const val BEAT_GUARD_MS = 60_000L
+        private const val BEAT_GUARD_MS = 60_000L
     }
 }

@@ -3,16 +3,34 @@ package link.dendritik.proto.pipe.protocol
 import java.util.UUID
 
 /**
- * The wire contract with the watchface. Mirrors `docs/protocol.md`; a change here
- * is a change there and in `watchface/package.json`, in the same commit.
+ * The wire contract with the watchfaces. Mirrors `docs/protocol.md`; a change here
+ * is a change there and in both `package.json`s, in the same commit.
  *
  * Android addresses AppMessage keys by **numeric id** — it never sees the string
  * names the watch's C code uses — so these integers must match
- * `watchface/build/appinfo.json`. Ids are positional from 10000 in the order the
- * names appear in `messageKeys`, so keys are only ever appended.
+ * `watchface-digital/build/appinfo.json`. Ids are positional from 10000 in the order
+ * the names appear in `messageKeys`, so keys are only ever appended. Both faces
+ * declare the same array in the same order, which is what lets one set of ids serve
+ * them both.
  */
 object Protocol {
-    val APP_UUID: UUID = UUID.fromString("f2fc68a6-9636-4694-929b-73c11c33f0e4")
+    /**
+     * Every watchface this companion feeds, addressed unconditionally.
+     *
+     * The firmware keys installed apps by UUID, so two faces cannot share one, and
+     * there is no inbound channel — the protocol runs phone → watch only — so the
+     * companion has no way to learn which face is on screen. `isWatchConnected()`
+     * reports the *Pebble app's* link state and says nothing about the foreground
+     * watchapp.
+     *
+     * Broadcasting to all of them is the answer rather than a limitation: a message
+     * addressed to a UUID nothing is running is simply NACKed and dropped, which costs
+     * one Bluetooth round trip and no state. Choosing would cost a protocol.
+     */
+    val APP_UUIDS: List<UUID> = listOf(
+        UUID.fromString("f2fc68a6-9636-4694-929b-73c11c33f0e4"),   // watchface-digital
+        UUID.fromString("bd9bd299-527e-4236-8206-27be3dc9781c"),   // watchface-analog
+    )
 
     const val KEY_HEARTBEAT = 10000
     const val KEY_CAL_EVENTS = 10001
@@ -39,19 +57,31 @@ object Protocol {
      * the one state where the device is definitely interactive, so a plain
      * [android.os.Handler] fires on time and costs nothing.
      *
-     * Everything else rides the slow tier. It has to: in Doze the system throttles
-     * `setAndAllowWhileIdle` to roughly one alarm per 9-15 minutes per app, so a
-     * nominally faster cadence would not be delivered and the watch would raise a
-     * companion-down alert every night. A calendar entry is timestamped and ages out
-     * on its own, which is a far smaller lie than an alert that flickers.
+     * Everything else rides the slow tier. Its period is bounded from below by the
+     * platform, not by taste: Doze allows `setAndAllowWhileIdle` to fire "no more than
+     * once per nine minutes, per app", which the power-management tables state as seven
+     * while-idle alarms an hour. 600 s is six an hour — inside that budget with one
+     * alarm of headroom, and comfortably inside the ten an hour the working-set standby
+     * bucket allows. Going faster would not be delivered, and an undelivered cadence is
+     * worse than a slow one: the watch would raise a companion-down alert every night on
+     * a promise the phone cannot keep.
+     *
+     * A calendar entry is timestamped and ages out on its own, which is a far smaller
+     * lie than an alert that flickers.
      *
      * The slow tier has no scheduler of its own, because that throttle counts alarms
      * per *app*: it is the period of the host's one periodic tick, which re-scans the
      * window and sends a bare heartbeat only when the scan had nothing to say. See
-     * `link.dendritik.proto.pipe.PipeService.tick`.
+     * [PipeEngine.tick][link.dendritik.proto.pipe.PipeEngine.tick].
+     *
+     * **This is the value the watch is told, always, even while the tick is backing
+     * off.** A backed-off period could only be declared by a message that got through,
+     * and a message getting through is what ends the backoff — so the base is the only
+     * period the watch can coherently be given. When the retries are failing the watch
+     * is *supposed* to notice. See [PipeEngine.resync] and `docs/protocol.md`.
      */
     const val HEARTBEAT_LIVE_S = 30
-    const val HEARTBEAT_IDLE_S = 900
+    const val HEARTBEAT_IDLE_S = 600
 }
 
 /**
