@@ -6,9 +6,9 @@ companion that feeds them both:
 ```
                                                   ┌──────────────────────────────────┐
                                                ┌─►│ watchface-digital/               │
-┌──────────────────────────────┐  AppMessage   │  │ a four-hour timeline down the    │
-│ Phone companion              │  Heartbeat,   │  │ left edge, plus a clock and      │
-│ (pipe/, Android)             │  CalEvents,   │  │ three rows beside it             │
+┌──────────────────────────────┐  AppMessage   │  │ a timeline down the left edge,   │
+│ Phone companion              │  Heartbeat,   │  │ four hours of it or six, plus a  │
+│ (pipe/, Android)             │  CalEvents,   │  │ clock and three rows beside it   │
 │                              │  CalFlags,    │  └──────────────────────────────────┘
 │ reads the calendar and the   │───────────────┤
 │ phone's battery, and         │  Nav*, Phone  │  ┌──────────────────────────────────┐
@@ -52,10 +52,18 @@ Shared by both:
 
 `watchface-digital/` — **now is fixed and the calendar moves:**
 
-- **The strip is a four-hour timeline down the left edge**, later always lower: one hour
-  above the pointer, three below, notched every fifteen minutes with the hours thicker.
-- **The pointer never moves.** It sits at the quarter mark and the ruler scrolls past it.
-- **The clock is plain digits**, level with the pointer, honouring the 12/24-hour setting.
+- **The strip is a timeline down the left edge**, later always lower, notched every
+  fifteen minutes with the hours thicker. Four hours on the rectangles — one above the
+  pointer, three below — and six on `gabbro`, one above and five below.
+- **The pointer never moves.** The ruler scrolls past it: at the quarter mark of a
+  straight strip, and at 330° of `gabbro`'s half-turn arc.
+- **`gabbro`'s six hours over half a turn is thirty degrees to the hour**, which is the
+  analog face's rate and an analog clock's own hour spacing. What the two do with it is
+  opposite: there the entry sits at its own clock angle and the hand moves; here the rule
+  is fixed and the scale slides under it, so a three o'clock meeting is *not* at the 3.
+- **The clock is plain digits**, honouring the 12/24-hour setting — level with the
+  pointer on the rectangles, and below it on `gabbro`, where the chord beside the mark is
+  narrower than the digits are wide.
 - The date, the countdown, nav and the warnings stack downward beside the strip.
 
 `watchface-analog/` — **the calendar is fixed and now moves:**
@@ -111,8 +119,8 @@ position in the visible window — seconds from its top — to a point on the bo
 the ray angle there. On a rectangle that angle is a constant 270°, which is to say a
 left-edge strip *is* the old dial's nine-o'clock ray: `step_in` moves inward toward the
 content, `step_side` moves along the track, and every primitive written for a ring works
-unchanged. On `gabbro` the angle sweeps a quarter turn down the left arc. One code path,
-two shapes.
+unchanged. On `gabbro` the angle sweeps half a turn, twelve o'clock round to six. One
+code path, two shapes.
 
 The cosine correction the dial needed is gone, and its absence is the point of the shape
 rather than an omission. A depth in pixels is only perpendicular to the boundary if the
@@ -121,8 +129,9 @@ band measured a third thinner at the corners. A circle's ray is its normal, and 
 vertical edge's, so both of the strip's shapes are square to their own boundary and a
 pixel count is already perpendicular.
 
-**Bands** are one representation doing all the work: `uint8_t coverage[240]`, one byte
-per *minute* of the visible window, holding the most prominent thing happening then.
+**Bands** are one representation doing all the work: `uint8_t coverage[]`, one byte per
+*minute* of the visible window — 240 of them on the rectangles and 360 on `gabbro` —
+holding the most prominent thing happening then.
 Overlapping appointments flatten because they write the same array, and `max()` makes a
 merged band inherit the more urgent member's weight. A minute is under a pixel of track
 on all three displays, so quantising to one costs nothing visible.
@@ -152,10 +161,21 @@ measured against. It reaches *out* at the track where markers reach *in* from it
 is what keeps the two apart, and it is drawn last, after everything, because the clock is
 pinned to it and the clock's background knockout would otherwise erase it.
 
-**The clock lines up with the pointer's body**, not with the arc point its apex touches.
-Identical on a rectangle; on `gabbro` the ray runs down and to the right, so the wedge
-sits a dozen pixels below that point and levelling the clock with the apex reads as
-floating above it.
+**The clock lines up with the pointer's body**, not with the arc point its apex touches —
+identical on a rectangle, and on an arc the ray runs down and to the right, so the mark's
+body sits some way below the point it touches.
+
+On `gabbro` it now lines up with neither. Half a turn puts the rule 30° back from twelve
+o'clock, near the top of the glass, where the chord left beside the strip is about 60 px
+against the ~100 `"00:00"` measures — and no font size recovers it, the chord being
+narrower still further up. So the clock drops to the highest row that will hold it and
+hangs off the mark rather than sitting beside it. The floor is solved from the clock's
+own measured width through `fit_row`'s width rule rather than tuned, so it follows a font
+change by itself, and it falls straight down rather than along the ray because `fit_row`
+gives every round row the same centre column — `y` is the only free variable there. The
+same half turn curls the hour-label lane over the top of the glass and into that row,
+which is why `gabbro` drops the label nearest now exactly as `flint` drops the one under
+its wedge, and loses the same nothing: the clock beside the gap is naming that very hour.
 
 ### `watchface-analog/` — the analog dial
 
@@ -173,8 +193,10 @@ One window, one layer, one update proc, split across the same shape of module se
 | `wbatt.{c,h}` | The watch's own hours-remaining estimate. |
 
 `events`, `wire` and `wbatt` are the digital face's files, copied. They carry no
-rendering knowledge; the only difference is the window, which is 1 h and 5 h here
-against 1 h and 3 h there.
+rendering knowledge, and they only *read* the window constants rather than defining
+them — which is what let the digital face's window become per-platform without the copies
+drifting. It is 1 h and 5 h here; there it is 1 h and 3 h on the rectangles and the same
+1 h and 5 h on `gabbro`.
 
 **Everything is polar, and there is one angular scale.** `angle_of_time()` maps a
 wall-clock instant to a dial angle — `((minutes % 720) * TRIG_MAX_ANGLE) / 720`, into
@@ -301,10 +323,11 @@ the app says so.
    have no position on a timeline and no duration that would fit one — and anything
    cancelled. Duration comes from `END - BEGIN`; a zero-length instance is a reminder.
 
-   The phone's window is deliberately wider than either face's — `[now − 1 h, now + 3 h]`
-   on the digital one and `[now − 1 h, now + 5 h]` on the analog one. Entries past a
-   face's horizon sit in its table undrawn and come into view as the window slides,
-   which costs one message instead of one per quarter hour, and one scan serves both.
+   The phone's window is deliberately wider than any face's — `[now − 1 h, now + 3 h]`
+   on the digital one's rectangles, and `[now − 1 h, now + 5 h]` on its round display
+   and on the analog face. Entries past a face's horizon sit in its table undrawn and
+   come into view as the window slides, which costs one message instead of one per
+   quarter hour, and one scan serves all of them.
 3. `EventDiff` compares the scan against what the companion believes the watch holds.
    A reconnect skips the diff and sends a **flush** instead, because a watchface that
    relaunched holds nothing.

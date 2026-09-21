@@ -8,6 +8,7 @@ import android.provider.CalendarContract
 import android.util.Log
 import androidx.core.content.ContextCompat
 import link.dendritik.proto.pipe.protocol.EventKind
+import link.dendritik.proto.pipe.protocol.WireIds
 
 /**
  * Reads the next few hours out of `CalendarContract`.
@@ -78,6 +79,16 @@ class CalendarSource(private val context: Context) {
      * hence an explicit mix rather than [Any.hashCode], whose contract does not
      * promise stability between runs. Minutes, not milliseconds, so sub-minute jitter
      * in a provider's reported start cannot re-key an entry.
+     *
+     * The result is masked to 31 bits. That is not cosmetic: bit 31 now marks the
+     * Nuron half of the id space, and this hash sets it for roughly half of all
+     * inputs, so without the mask the two sources would overlap on half their ids
+     * and silently overwrite each other. See [WireIds].
+     *
+     * Masking re-keys every existing entry once. That costs nothing, because
+     * `PebbleSender.sentEvents` lives in memory: an app update restarts the
+     * process, `PipeEngine.start()` flushes, and the watch drops its whole table
+     * before the new ids arrive.
      */
     private fun instanceId(eventId: Long, beginMs: Long): Int {
         var h = FNV_OFFSET
@@ -88,7 +99,7 @@ class CalendarSource(private val context: Context) {
                 v = v ushr 8
             }
         }
-        return h
+        return WireIds.calendar(h)
     }
 
     private companion object {

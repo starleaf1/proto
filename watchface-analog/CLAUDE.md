@@ -183,7 +183,7 @@ watchface-analog/
     geometry.{c,h}      The radial ladder, the angle mapping, the disc's rows
     theme.h             The palette and the two font choices
     events.{c,h}        The event table, the visible window, the countdown pick
-    slots.{c,h}         The countdown and the two notification pairs
+    slots.{c,h}         The countdown, the maneuver and the warning
     wire.{c,h}          The AppMessage inbox and the two watchdogs
     wbatt.{c,h}         The watch's own hours-remaining estimate
   src/pkjs/index.js     PebbleKit JS stub (deliberately does nothing)
@@ -230,7 +230,7 @@ is shorter as well as wider for the same reading: `"MON 22"` measures 50x18 in
 *and* shorter and `layout_compute()` solves a **smaller** disc, not a larger one.
 
 **flint gives both rows the same size where the other two keep the date a rung above the
-slot.** That display is the only one where the disc's radius is expensive - it is solved
+slot.** That display is the one where the disc's radius is dearest per row - it is solved
 from these two rows, drawn over the hands, and the hour hand is 60 px long to begin with.
 Measured: a 24 px date puts the disc at 37 and leaves 23 px of hour hand outside it,
 where 18 px puts it at 34 and leaves 26.
@@ -397,12 +397,14 @@ Each of these was tried the other way first.
   angled ray, and there is no such thing here.
 - **The disc's size is solved, not chosen.** Each row is a rectangle inscribed in the
   circle, so the binding corner is the far one, and the disc's radius is the largest of
-  those corners' distances plus a pad. It comes out at 32 px on `flint`, 44 on `emery`
-  and 61 on `gabbro` from the same four lines, and it moves on its own when a font size
-  does — which is how dropping the countdown's progress bar shrank it, and how the move
-  to system fonts moved it again: 34/44/65 now, measured, against 32/44/61 under the
-  Rajdhani resources. Gothic is wider per row and shorter per row, and on two of the
-  three displays those cancel.
+  those corners' distances plus a pad. It comes out from the same four lines on all
+  three, and it moves on its own when a row does — which is how dropping the countdown's
+  progress bar shrank it, how the move to system fonts moved it again, and how folding
+  `gabbro`'s two notification rows into one shrank it a third time. Measured:
+  32/44/61 px on flint/emery/gabbro under the Rajdhani resources, 34/44/65 after the
+  system fonts, **34/44/58 now**. Gothic is wider per row and shorter per row, and on
+  two of the three displays those cancel; the third number is a row that stopped
+  existing.
 - **The countdown is `"%d:%02d"`, not `"%02d:%02d"`.** One digit of hours rather than two
   is what fits it into flint's disc, and nothing is lost: the far tier reaches five hours
   and a count-up cannot outrun a meeting. It is clamped at 9:59 so it can never grow.
@@ -439,9 +441,26 @@ Each of these was tried the other way first.
   that keeps its shape keeps its alignment with the one opposite it. Stacking is the
   last resort, and in a row only twenty pixels tall it is unreadable, which is how the
   order was found.
-- **The notification pair is side by side on the rectangles and stacked on gabbro.**
-  Abreast they need 157 px of chord there and the disc offers 142. A circle sells
-  height near its centre far more cheaply than width, so the two became two rows.
+- **The notification pair is side by side on the rectangles and a single slot on
+  gabbro.** Abreast they need 157 px of chord there and the disc offers 142, and a
+  circle sells height near its centre far more cheaply than width — so the obvious fix
+  was two rows, and it was the wrong one. A row of the disc is the dearest place on
+  this face to put anything: it is solved into the radius, the radius is drawn over the
+  hands, and the second row cost seven pixels of it. What the rectangles have that the
+  round display does not is a strip of screen below the dial that costs the clock
+  nothing, and that is what pays for two readings there.
+
+  So on `gabbro` the notification area is one row holding one reading, chosen by strict
+  priority: the companion being gone, then the maneuver, then the phone's battery, then
+  the watch's. The plate is 58 px where two rows made it 65, and the difference is hour
+  hand. The rectangles are unchanged and still show a turn and a low battery at once.
+- **On that one slot a maneuver outranks a low battery, and on the rectangles it does
+  not have to.** A turn instruction is perishable — it is wrong within the minute if it
+  is not acted on — where a battery reading is true all day and will still be there
+  after the junction. The suppression is one line at the top of `slots_draw_warn()`,
+  gated on `band_inset`, and it is only ever reached on the round display. The tier
+  above it needs no line at all: both roads into the companion-down state null the
+  maneuver upstream, so nav cannot be active while the alert draws.
 - **The companion-down alert says `NO LINK` on the rectangles and shows only its glyph
   on `gabbro`.** It is the one reading in the band with no number under it, so the
   slashed phone is the only glyph on this face asked to carry a whole state on its own
@@ -449,7 +468,10 @@ Each of these was tried the other way first.
   learn it from. Where the band is a strip of screen there is room to spell it out.
   Where it is a row of the disc there is not: `layout_compute()` sizes the disc from the
   widest string each row can hold, so a seven-character label would grow the plate over
-  the dial permanently in order to state something that is true for minutes at a time.
+  the dial permanently in order to state something that is true for minutes at a time —
+  and would hand straight back the radius that merging the two rows into one just
+  bought. The merged row is budgeted against `"000 KM"`, which is the widest reading it
+  can hold that is not this one.
 - **That label is wider than warn's own share of the band, and borrows nav's.** Free
   rather than lucky. Both roads into the state drop the maneuver — the watchdog expiring
   in `hb_expired()` and the link going down in `wire_set_connected()`, each for its own

@@ -11,11 +11,16 @@ genuinely had no command-line path, which is why `demo_seed()` exists at all.
 
 The set covers every marker case at once — a running band, two overlapping bands that
 must flatten into one, clustered point entries that must merge, an overdue reminder, a
-marker sitting on top of a band, and one entry past the horizon that must not draw at
-all. **Keep it in step with `demo_seed()` in `src/c/proto.c`**; the two are meant to
-show the same face.
+marker sitting on top of a band, and entries at and past the horizon. **Keep it in step
+with `demo_seed()` in `src/c/proto.c`**; the two are meant to show the same face.
 
-    tools/send-demo-events.py                     # flush, then the nine entries
+It no longer shows the *same* face on all three platforms, and it cannot: the window is
+four hours on the rectangles and six on gabbro, so the last three entries are the round
+display's horizon cases and are simply three more things off the end of the other two's.
+The three entries are the sibling face's, verbatim — watchface-analog/ has run a
+six-hour window all along, and the two scripts are meant to differ only in prose.
+
+    tools/send-demo-events.py                     # flush, then the eleven entries
     tools/send-demo-events.py --emulator gabbro
     tools/send-demo-events.py --clear             # flush carrying no records
     tools/send-demo-events.py --remove 5 6        # delta: two removes, no flush
@@ -76,12 +81,31 @@ DEMO = [
     (1, -20, 90, EV_APPOINTMENT, "running: deep band across the pointer + count-up"),
     (2, 100, 40, EV_APPOINTMENT, "overlaps 3 -- the two must flatten to one band"),
     (3, 120, 45, EV_APPOINTMENT, "overlaps 2"),
-    (4, 40, 45, EV_APPOINTMENT, "inside 3 h, not 30 min"),
-    (5, -40, 0, EV_TASK, "overdue: solid wedge"),
+    (4, 40, 45, EV_APPOINTMENT, "ordinary upcoming: a third of the notch zone"),
+    (5, -40, 0, EV_TASK, "overdue: solid wedge above the pointer"),
     (6, 160, 0, EV_TASK, "4 min from 7 -- too close to draw apart"),
     (7, 164, 0, EV_TASK, "-> one deeper marker"),
     (8, 110, 0, EV_TASK, "sits on top of a band"),
-    (9, 200, 0, EV_TASK, "past the 3 h horizon -- must not draw"),
+    (9, 270, 90, EV_APPOINTMENT, "runs past gabbro's 5 h horizon -- clips at the end"),
+    (10, 295, 0, EV_TASK, "just inside gabbro's horizon"),
+    (11, 355, 0, EV_TASK, "past it -- must not draw"),
+]
+
+# Nuron quests, as `pipe` now sends them: the same records, but with bit 31 of the
+# id set. The id space is partitioned so a second source cannot silently replace a
+# calendar entry (see docs/protocol.md, "The second source"), and the point of this
+# set is to prove the watch does not care — a u32 with the high bit set must decode,
+# position, merge and linger exactly as a small one does.
+#
+# It is not a new *marker* case. Nuron entries are ordinary tasks, and if one of
+# these renders differently from its low-id twin the decoder is sign-extending
+# somewhere it should not.
+NURON_BIT = 0x80000000
+
+NURON_DEMO = [
+    (NURON_BIT | 21, 45, 0, EV_TASK, "high-bit id: must draw as an ordinary wedge"),
+    (NURON_BIT | 22, 47, 0, EV_TASK, "2 min from the last -- must still merge"),
+    (NURON_BIT | 23, -30, 0, EV_TASK, "high-bit id, overdue: must take the late colour"),
 ]
 
 
@@ -185,9 +209,10 @@ def pack(records):
     return blob
 
 
-def demo_records(now):
+def demo_records(now, nuron=False):
+    table = DEMO + (NURON_DEMO if nuron else [])
     return [(eid, now + off * 60, dur, kind, OP_UPSERT)
-            for eid, off, dur, kind, _ in DEMO]
+            for eid, off, dur, kind, _ in table]
 
 
 def describe(rec):
@@ -280,6 +305,10 @@ def main():
                     help="send removes for these ids as a delta, without flushing")
     ap.add_argument("--heartbeat", type=int, default=300, metavar="S",
                     help="seconds until the companion next checks in (15-3600)")
+    ap.add_argument("--nuron", action="store_true",
+                    help="add three Nuron entries, whose ids have bit 31 set. "
+                         "They must render identically to the low-id entries; "
+                         "anything else is a sign-extension bug in the decoder.")
     ap.add_argument("--dry-run", action="store_true",
                     help="print the blob and what it says, send nothing")
     opts = ap.parse_args()
@@ -311,7 +340,7 @@ def main():
         records = [(eid, now, 0, EV_TASK, OP_REMOVE) for eid in opts.remove]
         flush = False       # a delta: the watch keeps everything else it holds
     else:
-        records, flush = demo_records(now), True
+        records, flush = demo_records(now, opts.nuron), True
 
     return send(opts, records, flush)
 

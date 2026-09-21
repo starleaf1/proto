@@ -120,6 +120,53 @@ knowing:
   *does* expose completion (OpenTasks / Tasks.org, `org.dmfs.tasks`) can be added
   later as a companion-only change — no protocol change, no watchface change.
 
+### The second source
+
+That reserved extension has been taken. **Nuron** (`com.amborjo.questjournal`) is a
+second source of entries, read through its `QuestFactsProvider` over a
+`signature|knownSigner` permission, and it is a provider that *does* expose
+completion: a quest ticked off leaves the scan at once rather than waiting out the
+watch's linger.
+
+It cost no protocol change and no watchface change, which is what the reservation was
+for. Nuron entries are ordinary `kind = 1` records — a quest is a point in time, and
+a point in time is already a wedge. They are not given a `kind` of their own on
+purpose: the watch reads `kind` in exactly two places, both of them a glyph and an
+ink in `slots.c`, and a third value would mean an `events.h` enum, a widened clamp in
+`wire.c`, a persist version bump, a demo seed and a `send-demo-events.py` flag — all
+of it twice, once per face — so that a to-do from one app could look unlike a to-do
+from another. It would also be the asymmetric-rebuild hazard: `wire.c` folds an
+unknown `kind` to `EV_APPOINTMENT`, so a Nuron entry reaching an un-updated face
+would be inked as a meeting.
+
+**The id space is split by bit 31.** `CalendarSource.instanceId` is masked to 31 bits
+and Nuron ids set the bit, so the two sources cannot collide by arithmetic rather
+than by trusting FNV-1a's spread. This matters more than it looks: a cross-source
+collision is a silent *replacement*, because the watch upserts by id, and a marker
+quietly going missing is not something anyone reports. See `pipe`'s `WireIds.kt`,
+which owns the partition, and `QuestJournal`'s `WatchKeys.kt` and
+`omni-assistant/functions/src/pebble/keys.ts`, which compute the same hash in two
+other languages against shared fixed vectors.
+
+**There is still exactly one sender.** Nuron holds no PebbleKit dependency and never
+addresses the watch; it publishes facts and `pipe` sends them. Two senders sharing a
+table with `FLUSH` semantics would each drop the other's entries on every flush, so
+this is a structural rule rather than a convention — and the structure is that the
+only app with PebbleKit linked in is the one that owns the wire.
+
+`MergePolicy` in `pipe` is where the two become one table: a total order on
+`(startUtcS, kind, id)`, truncated to 24 so a flush stays a single message. The order
+has no ties, which is what makes two identical scans produce a byte-identical list —
+without that, `EventDiff` emits removes and adds against a table that did not change
+and the markers blink once a tick.
+
+**A Nuron source that cannot be read is not an empty one.** `NuronScan` is three
+cases, not a list: entries, *absent* (uninstalled or unpermitted — a durable zero,
+drop at once), and *unknown* (the provider threw, or has never reconciled). Unknown
+holds the last known set for three ticks and then lets go. Both failure directions
+are real: dropping on the first fault makes markers flicker, and holding for ever
+pins stale markers on a wrist with no way to tell they are old.
+
 Google Tasks cannot fill this gap: its on-device data is not reachable by third-party
 apps, and its REST API documents `due` as *"Only date information is recorded; the
 time portion of the timestamp is discarded"*, so every Google task arrives as a bare

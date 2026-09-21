@@ -1,11 +1,15 @@
 #include "strip.h"
 #include "events.h"
+#include "slots.h"
 #include "theme.h"
 #include <string.h>
 
 // ---------------------------------------------------------------------------
-// The strip is a four-hour timeline down the left edge: one hour above the
-// pointer, three below, later always lower.
+// The strip is a timeline down the left edge, later always lower: one hour above
+// the pointer and, below it, three on the rectangles and five on gabbro. The round
+// display's track is an arc of half a turn, which at six hours is thirty degrees to
+// the hour — an analog clock's spacing, on a scale that slides past a fixed rule.
+// See STRIP_AHEAD_S.
 //
 // Everything the markers have to do — span a duration, flatten where they
 // overlap, sit behind the notches, and read at two levels of prominence on a
@@ -25,7 +29,8 @@
 // that draws *outboard* of the track.
 //
 // The arrays are file-scope rather than automatic. A Pebble app's stack is
-// small and this is 241 bytes that would otherwise be live across four calls.
+// small and this is 241 bytes on the rectangles, 361 on gabbro, that would
+// otherwise be live across four calls.
 // ---------------------------------------------------------------------------
 
 #define COV_NONE 0
@@ -52,9 +57,14 @@ static int   s_pt_n;
 // the notches are walked and drawn in a pass of their own afterwards, because a label
 // has to land *over* the markers and the notches are drawn under them on flint.
 //
-// A four-hour window holds four or five of these; six is room to spare.
+// Sized from the window, because the window is per-platform now. The walk includes
+// both ends, so an n-hour window holds n+1 of these when `now` sits exactly on the
+// hour — five on the rectangles, seven on gabbro — and one spare past that. The
+// array used to be a literal six, which a six-hour window overruns by one; the bound
+// check below means that would have cost the last hour label silently rather than
+// crashing, which is the worse of the two.
 typedef struct { int32_t u; uint8_t hh; } Hour;
-static Hour s_hours[6];
+static Hour s_hours[STRIP_SPAN_MIN / 60 + 2];
 static int  s_hour_n;
 
 // A band this thin would otherwise vanish. Three minutes is about two pixels on
@@ -265,6 +275,15 @@ static bool notch_inverts(int32_t u) {
 // is a depth along the ray, so on a rectangle this is a box in a vertical lane and on
 // gabbro's arc it is a box centred on the ray, the lane curving with the strip. Nothing
 // here branches on shape.
+#ifdef PBL_ROUND
+// Do two boxes share a pixel? The SDK has grect_contains_point() and no rect-against-
+// rect test, and a label's plate has to be compared against a row's.
+static bool rect_hits(GRect a, GRect b) {
+  return a.origin.x < b.origin.x + b.size.w && b.origin.x < a.origin.x + a.size.w &&
+         a.origin.y < b.origin.y + b.size.h && b.origin.y < a.origin.y + a.size.h;
+}
+#endif
+
 static void draw_hour_label(GContext *ctx, const Layout *lo, GFont font,
                             int32_t u, int hh) {
   char buf[4];
@@ -327,8 +346,36 @@ static void draw_hour_label(GContext *ctx, const Layout *lo, GFont font,
   // stopped one pixel short of the first digit and the two read as one shape. Not three:
   // the lane is `margin` off the notch zone, and three would take the tip off the hour
   // notch this label is naming.
-  knock_out(ctx, GRect(box.origin.x - 2, box.origin.y,
-                       box.size.w + 4, box.size.h));
+  GRect plate = GRect(box.origin.x - 2, box.origin.y, box.size.w + 4, box.size.h);
+
+#ifdef PBL_ROUND
+  // And on gabbro, drop the one the clock lands on — flint's trade with the wedge
+  // above, arrived at from the other direction.
+  //
+  // The lane is a circle of its own, arc_r - (label_x + label_w/2) about the centre,
+  // and over a half turn that circle curls across the top of the glass and runs
+  // straight through the clock's row. The rows are drawn after the strip and knock out
+  // their own footprint, so the label does not survive the meeting; what draws is a
+  // sliver of a digit against the clock, which reads as damage rather than as a
+  // number. What is lost is the same repetition flint loses: the clock beside it is
+  // showing that very hour.
+  //
+  // num_box and warn_box only — never all five rows. The lane passes within a pixel of
+  // date_box's left edge around two hours ahead, so a blanket test would start dropping
+  // mid-window labels the moment label_w measured a pixel wider than expected. These
+  // two are the ends of the stack, which is where the lane actually arrives.
+  //
+  // The clock is unconditional and the warning is not, and that difference has to be
+  // honoured: the clock always draws and always knocks out, so the label it lands on is
+  // always lost, but a silent warnings row knocks out nothing and the label under it is
+  // perfectly readable. Testing warn_box unconditionally would delete the last hour of
+  // the window for the first twenty minutes of every hour to protect it from a row that
+  // is usually not there.
+  if (rect_hits(plate, lo->num_box)) return;
+  if (slots_warn_active() && rect_hits(plate, lo->warn_box)) return;
+#endif
+
+  knock_out(ctx, plate);
   graphics_context_set_text_color(ctx, COL_INK);
   graphics_draw_text(ctx, buf, font, box, GTextOverflowModeFill,
                      GTextAlignmentCenter, NULL);
@@ -350,8 +397,8 @@ static void draw_labels(GContext *ctx, const Layout *lo, GFont font) {
 // The hour notches are thicker, not longer. Length is already spoken for: it is what
 // separates a notch from a band, which fills part of the same depth. They are also the
 // ones that carry a number, which is what makes the strip say *when* rather than only
-// how far off — four or five labels in the window, and the reader stops counting
-// notches from the "now" mark. This pass only records where they are; draw_labels()
+// how far off — four or five labels in the window on the rectangles and six or seven
+// on gabbro, and the reader stops counting notches from the "now" mark. This pass only records where they are; draw_labels()
 // puts them on the screen once everything they have to sit over is down.
 static void draw_notches(GContext *ctx, const Layout *lo, time_t now) {
   // A ninetieth of the radius is 0, 1 and 1 on the three displays, so stroke_px() put

@@ -2,14 +2,14 @@
 #include <pebble.h>
 
 // ---------------------------------------------------------------------------
-// The dial, the ring, and the two plates cut into the face.
+// The dial, the ring, and the disc cut into the middle of it.
 //
 // Every coordinate derives from the root layer's bounds, so the same code lays
 // out a 144x168 rectangle (flint), a 200x228 one (emery) and a 260x260 circle
 // (gabbro). On the rectangles the dial is the full screen width and flush to
 // the top, and the strip of screen left under it is the notification band. On
-// the round display the dial is the whole glass and the notification area moves
-// inside it, to six o'clock.
+// the round display the dial is the whole glass, so the notification area moves
+// inside it — the disc's bottom row, which is one slot where the band is two.
 //
 // Everything here is polar. There is one centre, one set of radii and one
 // angular scale, and that scale is the clock's own: this face has no linear
@@ -44,9 +44,11 @@
 // argument, not a spacing one. Its number begins with a '+' or a '-' now, which
 // is a glyph of width the row did not carry before — and a glyph of width in a
 // row of the disc costs the plate more radius than the progress bar the sign
-// replaced ever cost it in height. Halving this gap pays most of it back: measured, the
-// plate comes out at 32/44/61 px on flint/emery/gabbro against 33/44/64 with the bar,
-// so two of the three give radius back and none of them asks for more.
+// replaced ever cost it in height. Halving this gap pays most of it back: at the time,
+// the plate came out at 32/44/61 px on flint/emery/gabbro against 33/44/64 with the
+// bar, so two of the three gave radius back and none of them asked for more. It is
+// 34/44/58 now — the fonts changed, and the round display's two notification rows
+// became one.
 //
 // Half and not all of it: at no gap the row still read, but a *task* countdown
 // put the blunt wedge hard against the minus sign, and a solid triangle followed
@@ -101,10 +103,11 @@
 // disc moves and the plate is sized exactly as before.
 #define SIGN_RISE(h) ((h) * 3 / 16)
 
-// How the notification pair sits in its row. Side by side on the rectangles,
+// How the notification reading sits in its row. Side by side on the rectangles,
 // where the band under the dial is one wide row and the two read as a line;
-// centred on the round display, where they are two rows of the disc and a
-// shared centre is what a circle offers in place of a shared edge.
+// centred on the round display, where they are not two readings at all but one
+// row holding whichever of them outranks the rest, and a lone reading in a
+// circle belongs on its centre line.
 #define NAV_ALIGN  PBL_IF_ROUND_ELSE(GTextAlignmentCenter, GTextAlignmentLeft)
 #define WARN_ALIGN PBL_IF_ROUND_ELSE(GTextAlignmentCenter, GTextAlignmentRight)
 
@@ -151,8 +154,8 @@ typedef struct {
   GRect   date_box;    // the weekday and the day of the month, one line
   GRect   count_box;   // the countdown, signed; a plain row of the disc
   GRect   nav_box;
-  GRect   warn_box;
-  bool    band_inset;  // true where the notification pair is a row of the disc
+  GRect   warn_box;    // the same rect as nav_box where band_inset: one slot, not two
+  bool    band_inset;  // true where the notification reading is a row of the disc
 } Layout;
 
 Layout layout_compute(GRect bounds, GFont date_font, GFont slot_font);

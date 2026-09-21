@@ -11,8 +11,10 @@
 // ---------------------------------------------------------------------------
 // proto — a calendar-driven watchface.
 //
-// The left edge is a four-hour timeline, read downward: one hour behind, three
-// ahead, and a pointer at the quarter mark that never moves. Appointments are
+// The left edge is a timeline, read downward: one hour behind and three ahead on
+// the rectangles, one behind and five ahead on gabbro, with a pointer that never
+// moves — at the quarter mark of a straight strip, and at 330 degrees of the round
+// one's half-turn arc. Appointments are
 // bands spanning their duration with the quarter-hour notches cut through them;
 // tasks and reminders are wedges poking inward off the ruler. See strip.c.
 //
@@ -50,8 +52,8 @@ static void update_buffers(void) {
   // to show. A stationary pointer cannot carry an hour, so the digits do.
   //
   // No AM/PM. There is no room for it beside the strip at any readable size, and
-  // the strip is already showing four hours of context around now — which is a
-  // better answer to "morning or evening?" than two letters.
+  // the strip is already showing hours of context around now — four of them, or six
+  // on gabbro — which is a better answer to "morning or evening?" than two letters.
   if (clock_is_24h_style()) {
     strftime(s_time_buf, sizeof s_time_buf, "%H:%M", &s_tm);
   } else {
@@ -142,12 +144,17 @@ static void demo_seed(time_t now) {
   events_upsert(1, now - 20 * 60,  90, EV_APPOINTMENT);  // running: deep band + count-up
   events_upsert(2, now + 100 * 60, 40, EV_APPOINTMENT);  // these two overlap and
   events_upsert(3, now + 120 * 60, 45, EV_APPOINTMENT);  // must flatten to one band
-  events_upsert(4, now + 40 * 60,  45, EV_APPOINTMENT);  // inside 3 h, not 30 min
+  events_upsert(4, now + 40 * 60,  45, EV_APPOINTMENT);  // ordinary upcoming
   events_upsert(5, now - 40 * 60,   0, EV_TASK);         // overdue: solid wedge
   events_upsert(6, now + 160 * 60,  0, EV_TASK);         // 4 min apart -> too close
   events_upsert(7, now + 164 * 60,  0, EV_TASK);         // -> one deeper marker
   events_upsert(8, now + 110 * 60,  0, EV_TASK);         // sits on top of a band
-  events_upsert(9, now + 200 * 60,  0, EV_TASK);         // past the horizon: must not draw
+  // The horizon cases, and they no longer land the same way on all three: the last
+  // three are past it on the rectangles and are gabbro's end-of-window set, the
+  // window being four hours there and six here.
+  events_upsert(9, now + 270 * 60, 90, EV_APPOINTMENT);  // clips at gabbro's end
+  events_upsert(10, now + 295 * 60, 0, EV_TASK);         // just inside gabbro's horizon
+  events_upsert(11, now + 355 * 60, 0, EV_TASK);         // past it: must not draw
 }
 #endif
 

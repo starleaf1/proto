@@ -90,14 +90,19 @@
 //
 //                     "MON 22"     "+0:00"    "000 KM"     disc
 //   was  flint      62 x 20      34 x 16     48 x 16      32 px
-//   now  flint      50 x 18      30 x 14     39 x 14      32 px
+//   now  flint      50 x 18      38 x 18     48 x 18      34 px
 //   was  emery      86 x 28      47 x 22     69 x 22      44 px
 //   now  emery      67 x 28      44 x 24     54 x 24      44 px
+//        gabbro     67 x 28      44 x 24     54 x 24      58 px
+//
+// flint's slot row measures at 18 and not 14 because both of its rows are the date's
+// size — see below. gabbro measures identically to emery and still solves a disc
+// half again as large, because it has one more row in it.
 //
 // A system font's number is its pixel size, and the content height comes back equal to
 // it exactly — which the TTF resources' em numbers never did.
 // One size for both rows here, where the other two displays keep the date a rung
-// above the slot. flint is the only platform where the disc's radius is expensive:
+// above the slot. flint is the display where the disc's radius is dearest per row:
 // it is solved from these two rows, it is drawn over the hands, and the hour hand is
 // 60 px long to begin with. Measured, a 24 px date puts the disc at 37 and leaves 23
 // px of hour hand outside it — a stub — where 18 px puts it at 34 and leaves 26. The

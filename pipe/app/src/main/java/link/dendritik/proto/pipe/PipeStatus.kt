@@ -25,7 +25,27 @@ object PipeStatus {
     var running by mutableStateOf(false)
     var watchConnected by mutableStateOf(false)
     var calendarGranted by mutableStateOf(false)
+
+    /** Entries actually sent — the merge of both sources, capped at MergePolicy.MAX_MERGED. */
     var eventCount by mutableStateOf(0)
+
+    /**
+     * Per-source counts, before the merge and the cap.
+     *
+     * They earn their place on the diagnostics screen the same way `watchPresent`
+     * does: when the watch shows fewer markers than expected there are three
+     * unlike causes — one source is empty, the merge capped, or the send failed —
+     * and none of them is distinguishable from the other end of a Bluetooth link.
+     */
+    var calendarEventCount by mutableStateOf(0)
+    var nuronEventCount by mutableStateOf(0)
+
+    /**
+     * Whether Nuron answered, and if not, how long we have been holding its last
+     * answer. "unreadable (holding, 2/3)" is the one line that explains markers
+     * which are present but should not be, and it is invisible from anywhere else.
+     */
+    var nuronState by mutableStateOf("never read")
 
     /** Which host is holding the engine open. */
     var host by mutableStateOf(Host.FOREGROUND)

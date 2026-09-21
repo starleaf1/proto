@@ -12,6 +12,10 @@ import androidx.core.content.ContextCompat
 import link.dendritik.proto.pipe.battery.PhoneBattery
 import link.dendritik.proto.pipe.calendar.CalendarSource
 import link.dendritik.proto.pipe.calendar.CalendarWatcher
+import link.dendritik.proto.pipe.nuron.NuronHolder
+import link.dendritik.proto.pipe.nuron.NuronSource
+import link.dendritik.proto.pipe.nuron.NuronWatcher
+import link.dendritik.proto.pipe.pebble.MergePolicy
 import link.dendritik.proto.pipe.pebble.PebbleSender
 import link.dendritik.proto.pipe.protocol.Protocol
 
@@ -70,6 +74,14 @@ class PipeEngine(private val context: Context) {
     private val battery = PhoneBattery(context) { sender.submitBattery(it) }
     private val watcher = CalendarWatcher(context) { reconcile(flush = false) }
 
+    // The second source. It contributes the same EventFacts as the calendar and
+    // is merged into one table by MergePolicy, because the watch has one table
+    // and FLUSH semantics: two independent senders would each drop the other's
+    // entries on every flush.
+    private val nuron = NuronSource(context)
+    private val nuronHolder = NuronHolder()
+    private val nuronWatcher = NuronWatcher(context) { reconcile(flush = false) }
+
     private val alarms = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
     private var receiver: BroadcastReceiver? = null
 
@@ -93,6 +105,7 @@ class PipeEngine(private val context: Context) {
         sender.onWatchConnected = { reconcile(flush = true) }
         sender.start()
         watcher.start()
+        nuronWatcher.start()
         battery.start()
         startTick()
 
@@ -112,6 +125,7 @@ class PipeEngine(private val context: Context) {
         receiver = null
         battery.stop()
         watcher.stop()
+        nuronWatcher.stop()
         sender.stop()
     }
 
@@ -121,8 +135,18 @@ class PipeEngine(private val context: Context) {
 
     /** Returns whether anything reached the watch. */
     private fun reconcile(flush: Boolean): Boolean {
-        val events = calendar.query(System.currentTimeMillis())
+        val now = System.currentTimeMillis()
+        val calendarEvents = calendar.query(now)
+        // The holder is what keeps a transient provider fault from wiping every
+        // Nuron marker, and what stops a permanently broken one from pinning
+        // stale markers for ever. See NuronHolder.
+        val nuronEvents = nuronHolder.accept(nuron.scan())
+        val events = MergePolicy.merge(calendarEvents, nuronEvents)
+
         PipeStatus.eventCount = events.size
+        PipeStatus.calendarEventCount = calendarEvents.size
+        PipeStatus.nuronEventCount = nuronEvents.size
+        PipeStatus.nuronState = nuronHolder.state
         PipeStatus.calendarGranted = calendar.hasPermission()
         PipeStatus.watchConnected = sender.isWatchConnected()
         val sent = sender.syncCalendar(events, flush)

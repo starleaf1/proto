@@ -439,6 +439,21 @@ void slots_draw_nav(GContext *ctx, const Layout *lo, GFont font) {
 // phone battery therefore suppresses the watch's own warning, which is deliberate:
 // one row, one thing, and the phone is the half of the system that this face
 // depends on and cannot see for itself.
+// Whether the warnings row has anything to say, without saying it.
+//
+// Split out for the hour labels: on gabbro their lane curls under the bottom of the
+// glass and into this row, and a row that draws nothing knocks nothing out — so the
+// label may only be dropped when something is actually going to land on it. The row
+// itself asks the same question by drawing and giving up, which is why the two share
+// the enum rather than the condition being written twice.
+bool slots_warn_active(void) {
+  if (!wire_companion_alive()) return true;
+  int pb = wire_phone_battery();
+  if (pb >= 0 && pb <= PHONE_BATT_LOW) return true;
+  int wh = wbatt_hours();
+  return wh >= 0 && wh <= WATCH_BATT_LOW_H;
+}
+
 void slots_draw_warn(GContext *ctx, const Layout *lo, GFont font) {
   char text[16] = "";
   GColor ink = COL_INK;

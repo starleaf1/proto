@@ -34,22 +34,41 @@ static int16_t isqrt32(int32_t v) {
 }
 
 #ifdef PBL_ROUND
-// The arc the strip is traced on: a quarter turn down the left of the circle, from
-// 315 degrees at the top to 225 at the bottom.
+// The arc the strip is traced on: half a turn down the left of the circle, from the
+// twelve o'clock position at the top to the six o'clock position at the bottom.
 //
-// The span is a real tuning knob and 90 degrees is not arbitrary. The arc bulges
-// hard left at nine o'clock and curls back in at both ends, so a wider span pushes
-// its ends rightward into the content column at exactly the height the clock wants
-// — 120 degrees costs a whole font size. Narrower than 90 and the ends crowd the
-// clock from the other direction, because the circle pinches toward the top.
-#define ARC_TOP_DEG   315
-#define ARC_SPAN_DEG   90
+// The span is not a tuning knob any more, it is the reading. Half a turn over a
+// six-hour window is thirty degrees to the hour, which is an analog clock's own hour
+// spacing, so the graduations land where a reader already expects hours to be and the
+// rule at STRIP_BACK_S falls on 330 degrees. The scale is what moves; the rule does
+// not. That is the whole difference from watchface-analog/, whose ring runs at this
+// same rate but pins each entry to the clock angle of its own time.
+//
+// It was 90 degrees at 315, and the comment here used to say a wider span pushes the
+// arc's ends rightward into the content column at exactly the height the clock wants.
+// That was correct and the bill is paid rather than dodged: the clock no longer sits
+// level with the rule (see layout_compute) and the hour-label lane now curls into the
+// clock's own row (see draw_hour_label). Both are stated where they happen.
+#define ARC_TOP_DEG   360
+#define ARC_SPAN_DEG  180
 
 // Where `u` lands on the arc, in trig angles rather than in whole degrees.
 //
 // One function, because two callers have to agree to the pixel: a band's square end is
 // placed by this and so is the notch or the marker it has to line up with. A whole
 // degree of gabbro's arc is 2.2 px, which is a rounding either of them would show.
+//
+// The result is confined to [TRIG_MAX_ANGLE/2, TRIG_MAX_ANGLE] by construction, and
+// that is worth knowing because the sibling face's fill_ring_band() carries a
+// normalise-and-split that this face does not need: its ring rides with the hour hand
+// and straddles twelve o'clock for six hours out of every twelve, where this arc is a
+// fixed half turn that never does. DEG_TO_TRIGANGLE(360) is exactly TRIG_MAX_ANGLE,
+// which sin_lookup() and graphics_fill_radial() both take — the analog face passes it
+// as an end angle as its ordinary case.
+//
+// u * DEG_TO_TRIGANGLE(180) peaks at 21600 * 32768 = 708M, inside int32 with threefold
+// room to spare. It was 235M at a quarter turn of four hours, so the margin is worth
+// re-checking if either constant grows again.
 static int32_t arc_angle(int32_t u) {
   // Later is lower, so the angle *decreases* down the arc.
   return DEG_TO_TRIGANGLE(ARC_TOP_DEG)
@@ -395,9 +414,12 @@ Layout layout_compute(GRect bounds, GFont num_font, GFont date_font,
 
 #ifdef PBL_ROUND
   lo.arc_r = lo.radius - margin;
-  // A quarter of the circumference. TRIG_MAX_ANGLE would be the long way round
-  // for one constant.
-  lo.track_px = (int16_t)((int32_t)lo.arc_r * 157 / 100);
+  // The arc's own length: 2*pi*r scaled by ARC_SPAN_DEG/360, which is 314/100 of the
+  // radius per half turn. Derived from the span rather than written out, because these
+  // two have to move together — u_of_px() is what turns a marker's half-width, a halo
+  // and the rule's own thickness into track-seconds, so a stale length quietly doubles
+  // every one of them. Bit-identical to the 157/100 this replaced when the span was 90.
+  lo.track_px = (int16_t)((int32_t)lo.arc_r * 314 * ARC_SPAN_DEG / 18000);
 #else
   lo.strip_x = bounds.origin.x + margin;
   lo.strip_top = bounds.origin.y + margin;
@@ -478,10 +500,10 @@ Layout layout_compute(GRect bounds, GFont num_font, GFont date_font,
   // And it goes on the *pointer*, not on the point of the track the pointer marks.
   //
   // Those are the same y on a rectangle, where the ray is horizontal and the mark
-  // reaches straight in. On gabbro's arc they are not: the ray at the quarter mark
-  // runs down and to the right, so the mark's body sits some way below the arc point
-  // it touches, and a clock levelled with that point reads as sitting above the thing
-  // it is supposed to line up with. The eye lines up with the shape, so the shape is
+  // reaches straight in. On gabbro's arc they are not: the ray at the mark runs down
+  // and to the right, so the mark's body sits some way below the arc point it
+  // touches, and a clock levelled with that point reads as sitting above the thing it
+  // is supposed to line up with. The eye lines up with the shape, so the shape is
   // what to measure — whichever shape this display's "now" is. On colour that is a
   // rule struck across the strip and its middle is half its length in; on flint it is
   // the wedge, whose body starts past the notch zone.
@@ -491,6 +513,34 @@ Layout layout_compute(GRect bounds, GFont num_font, GFont date_font,
 
   int16_t top = py - num_h / 2 - ns.h / 20;
   if (top < span_top) top = span_top;
+
+#ifdef PBL_ROUND
+  // And on gabbro it is levelled with the mark no longer, because the circle will not
+  // have it. A half-turn arc puts the rule 30 degrees back from twelve o'clock, which
+  // is near the top of the glass, and fit_row() leaves a row up there about 60 px of
+  // chord against the ~100 that "00:00" measures. No font size recovers it: to put the
+  // clock's ink level with the rule the box would have to start where the usable chord
+  // is thinner than the clock is wide. So the clock falls to the highest position that
+  // will hold it and hangs off the mark instead of sitting beside it.
+  //
+  // It falls straight down, not along the ray, and the difference is worth being exact
+  // about: fit_row() centres every round row on center.x + zone/2 at every height, so
+  // x is not a free variable here and y is the only thing this can choose.
+  //
+  // Solved, not chosen — it is fit_row()'s own width rule (2*half - zone >= ns.w) read
+  // backwards, so it follows a font change on its own the way the sibling face's disc
+  // radius does. isqrt32() truncates, which makes dy smaller and `top` larger, so the
+  // rounding falls on the safe side; it returns 0 for a negative argument, so a font
+  // set too wide for any chord lands on the centre line rather than on garbage. The
+  // margin is the row's slack, and on gabbro there are about 9 px of it: FONT_NUM
+  // cannot be raised any further, and every pixel label_w grows comes straight out of
+  // this, label_w being inside `zone`.
+  int16_t need_half = (ns.w + lo.zone) / 2 + margin;
+  int16_t fit_dy = (need_half < lo.arc_r)
+      ? isqrt32((int32_t)lo.arc_r * lo.arc_r - (int32_t)need_half * need_half) : 0;
+  int16_t clock_top_min = lo.center.y - fit_dy;
+  if (top < clock_top_min) top = clock_top_min;
+#endif
 
   int16_t room = lo.warn_box.origin.y - top - 2;
   int16_t fixed = num_h + date_h + count_h;

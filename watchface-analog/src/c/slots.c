@@ -471,17 +471,24 @@ void slots_draw_nav(GContext *ctx, const Layout *lo, GFont font) {
                      GTextAlignmentLeft, NULL);
 }
 
-// The right of the notification band: what the watch cannot vouch for, and what
-// is about to run out.
+// What the watch cannot vouch for, and what is about to run out.
 //
 // Strict priority — the first thing that is true is the only thing shown. A low
 // phone battery therefore suppresses the watch's own warning, which is
 // deliberate: one slot, one thing, and the phone is the half of the system that
 // this face depends on and cannot see for itself.
 //
-// Right-aligned, against nav's left. The two share a band rather than stacking,
-// because the dial has already taken the height a second row would need — and
-// they are the only two things on this face that are not a time.
+// On the round display the maneuver is in that priority too, above both
+// batteries, because there this row and nav's are the same row. A turn
+// instruction is perishable — it is wrong within the minute if it is not acted
+// on — where a battery reading is true all day and will still be there after the
+// junction. So nav takes the slot while it has one, and the guard below is the
+// whole of that rule; the state that outranks nav, the companion being gone,
+// needs no guard because both roads into it null the maneuver upstream.
+//
+// On the rectangles nothing is suppressed: there the band is a strip of screen
+// wide enough for two readings, and this one is the right of it, against nav's
+// left. They are the only two things on this face that are not a time.
 //
 // The companion-down state is the one reading here that has no number, and on the
 // rectangles it says so in words. The slashed phone alone is the only glyph on this
@@ -495,6 +502,9 @@ void slots_draw_nav(GContext *ctx, const Layout *lo, GFont font) {
 // permanently to state something that is true for minutes at a time. The glyph carries
 // that case alone there, as it did everywhere before.
 void slots_draw_warn(GContext *ctx, const Layout *lo, GFont font) {
+  // Where the slot is shared, the maneuver has it. See above.
+  if (lo->band_inset && wire_nav_active()) return;
+
   char text[16] = "";
   GColor ink = COL_INK;
   enum { T_NONE, T_DOWN, T_PHONE, T_WATCH } which = T_NONE;

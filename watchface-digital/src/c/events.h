@@ -59,8 +59,10 @@ bool event_visible(const Event *e, time_t now);
 bool event_prominent(const Event *e, time_t now);
 
 // What the bottom slot should say, resolved by the priority the face promises:
-// anything inside 30 min first, then an appointment already running, then
-// anything inside 3 h. Soonest wins within a tier.
+// anything inside 30 min first, then an appointment already running, then anything
+// inside the window's own reach forward — 3 h on the rectangles, 5 h on gabbro, so
+// the countdown never names something the reader cannot also see a marker for.
+// Soonest wins within a tier.
 typedef struct {
   bool    valid;
   uint8_t kind;

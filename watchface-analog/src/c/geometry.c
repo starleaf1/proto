@@ -350,25 +350,28 @@ Layout layout_compute(GRect bounds, GFont date_font, GFont slot_font) {
 
   // The rows of the disc, top to bottom, each with the gap that precedes it.
   //
-  // Four on the round display, two on the rectangles. There the circle leaves a
+  // Three on the round display, two on the rectangles. There the circle leaves a
   // strip of screen under the dial and the notification pair lives in it side by
-  // side; here it does not, so the pair becomes two rows of the disc — still
-  // "inside the clock, toward six", and stacked rather than side by side
-  // because a circle sells height near its centre far more cheaply than width.
-  // Laid out abreast they need 157 px of chord on gabbro and there are 142.
+  // side; here it does not, and a row of the disc is the most expensive place on
+  // this face to put anything — so the pair is one row carrying one reading, and
+  // the next turn and whatever is running out take strict priority over each
+  // other rather than taking a lane each. Abreast they need 157 px of chord here
+  // and there are 142; stacked they cost radius the hour hand wants back.
   typedef struct { int16_t gap, h, w; } Row;
-  Row rows[4];
+  Row rows[3];
   int nrows = 0;
   rows[nrows++] = (Row){ 0, ROW_H(ds.h), ds.w };
   rows[nrows++] = (Row){ 0, count_h, count_w };
   if (lo.band_inset) {
-    // Half a margin, not a whole one. The notification pair is still part of the
+    // Half a margin, not a whole one. The notification row is still part of the
     // same reading as the countdown above it — what is next, and what is wrong —
     // and a full margin read as a second block that had drifted down the disc.
     int16_t g = margin / 2;
     if (g < 2) g = 2;
-    rows[nrows++] = (Row){ g, row_h, nav_w };
-    rows[nrows++] = (Row){ 0, row_h, warn_w };
+    // Budgeted against the wider of the two readings it can hold — nav's, which
+    // carries a unit as well as a number — so the plate does not resize at the
+    // minute a maneuver gives way to a battery.
+    rows[nrows++] = (Row){ g, row_h, nav_w > warn_w ? nav_w : warn_w };
   }
 
   int16_t total_h = 0;
@@ -406,7 +409,7 @@ Layout layout_compute(GRect bounds, GFont date_font, GFont slot_font) {
 
   // Place the rows, each as wide as the chord at its own far edge, so a centred
   // string sits in the middle of the room it actually has.
-  GRect boxes[4];
+  GRect boxes[3];
   {
     int16_t y = top;
     for (int i = 0; i < nrows; i++) {
@@ -423,8 +426,11 @@ Layout layout_compute(GRect bounds, GFont date_font, GFont slot_font) {
   lo.count_box = boxes[1];
 
   if (lo.band_inset) {
-    lo.nav_box = boxes[2];
-    lo.warn_box = boxes[3];
+    // One row, and both painters are pointed at it. They never contend for it:
+    // slots_draw_warn() stands down while a maneuver is drawing, and the one
+    // reading that outranks a maneuver — the companion being gone — has already
+    // nulled it upstream. See slots_draw_warn().
+    lo.nav_box = lo.warn_box = boxes[2];
   } else {
     // Under the dial, on plain background — nothing crosses it, so it needs no
     // plate of its own.

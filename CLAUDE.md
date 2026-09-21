@@ -4,12 +4,17 @@
 feeds them both. The calendar is pushed to the watch by an Android companion over
 Bluetooth; the faces read the same six hours two different ways.
 
-**`watchface-digital/`** reads the left edge of the display as a four-hour timeline
-running downward — one hour behind, three ahead, and a "now" mark at the quarter mark
-that never moves. Appointments are bands spanning their duration, tasks and reminders
-are wedges poking inward off the ruler, and the hour is numbered in a small lane just
-inside it. A digital clock sits level with the now mark, and the date, a countdown, the
-next turn and whatever is running out stack beneath it, left-aligned against the strip.
+**`watchface-digital/`** reads the left edge of the display as a timeline running
+downward past a "now" mark that never moves. On the two rectangles that is four hours —
+one hour behind, three ahead, the mark at the quarter mark. On `gabbro` it is six hours
+on a half-turn arc from the twelve o'clock position round to the six, which is thirty
+degrees to the hour: an analog clock's own spacing, worked like a bathroom scale, with
+the scale sliding past a red rule fixed at 330°. Appointments are bands spanning their
+duration, tasks and reminders are wedges poking inward off the ruler, and the hour is
+numbered in a small lane just inside it. A digital clock sits level with the now mark on
+the rectangles and below it on `gabbro`, and the date, a countdown, the next turn and
+whatever is running out stack beneath it, left-aligned against the strip and centred on
+the circle.
 
 **`watchface-analog/`** is a circular analog clock whose rim is a six-hour timeline —
 one hour behind, five ahead — laid on the dial at the clock angle of each entry's own
@@ -131,6 +136,25 @@ Shared by both faces:
   here it cannot — depths are pixel counts perpendicular to the boundary, and both shapes
   are square to their own boundary, so no correction is needed. The dial this replaced
   did need one, and its absence is the shape paying for itself rather than a regression.
+- **The window is six hours on `gabbro` and four on the rectangles, and that is the one
+  measurement on this face that differs by platform rather than by shape.** The round
+  track is half a turn, so six hours across it is thirty degrees to the hour — the
+  spacing a reader already has for hours, borrowed. A straight edge has no such reading
+  to offer, and four hours is simply what stays legible down it at a fifteen-minute
+  pitch. Both faces now graduate at thirty degrees to the hour and still say opposite
+  things with it: `watchface-analog/` pins each entry to the clock angle of its own time
+  and lets the hand move; this one pins the rule and slides the scale, so here a three
+  o'clock meeting is *not* at the 3.
+- **`gabbro`'s clock is not level with the now mark, and every other display's is.** A
+  half-turn arc puts the rule near twelve o'clock, where the chord is far too narrow to
+  hold `"00:00"` — so the clock falls to the highest position that will hold it and hangs
+  off the mark instead of sitting beside it. It is solved from the clock's own measured
+  width rather than tuned, so it follows a font change on its own.
+- **The hour label nearest now goes missing for most of every hour on `gabbro` too,** and
+  for the same reason it does on `flint`: something drawn later lands on it. There it is
+  the pointer wedge, here the clock, whose row the label lane curls into over the top of
+  the glass. What is dropped is the one label the face states twice — the clock beside
+  the gap is showing that very hour.
 
 `watchface-analog/` only:
 
@@ -146,6 +170,14 @@ Shared by both faces:
   markers it would be asserting a clear six hours, and the ring looks the same when the
   companion has never spoken. The digital face's ruler stays, because it also carries
   the hour numbers and the now mark.
+- **On `gabbro` a maneuver hides a low battery, and on the rectangles it does not.**
+  The rectangles have a strip of screen under the dial that costs the clock nothing,
+  and it holds two readings abreast. The round glass has no such strip, so the same
+  pair are a row of the centre disc — the dearest place on that face to put anything,
+  because the disc's radius is solved from its rows and drawn over the hands. One row
+  instead of two is seven pixels of radius given back to the hour hand, and what it
+  costs is that the four readings must queue: no link, then the maneuver, then the
+  phone's battery, then the watch's. A turn instruction is the perishable one.
 - **The hands break at the central disc and resume past it.** The disc is drawn over
   them, which inverts the digital face's rule that nothing may cover the now mark. It
   covers the half of each hand nearest the pivot, which carries no reading, and it is

@@ -9,18 +9,32 @@
 // 260x260 circle (gabbro). Only track_at() branches on display shape.
 // ---------------------------------------------------------------------------
 
-// The visible window: 1 h above the pointer and 3 h below it. The pointer
-// therefore sits at a quarter of the track and never moves — the ruler slides
-// past it, one minute at a time, and that is the whole of the "scrolling".
+// The visible window: 1 h above the pointer, and below it 3 h on the rectangles and
+// 5 h on gabbro. The pointer never moves — the ruler slides past it, one minute at a
+// time, and that is the whole of the "scrolling".
+//
+// It is the one measurement on this face that differs by *platform* rather than by
+// display shape, and the reason is that only one of the two shapes has an hour
+// spacing worth borrowing. gabbro's track is half a turn of the glass, so six hours
+// across it is thirty degrees to the hour — an analog clock's own spacing, and the
+// rate watchface-analog/ runs its ring at. What the two faces do with that rate is
+// still opposite: there every entry sits at the clock angle of its own time and the
+// hour hand is the now mark, so nothing moves; here the scale slides past a rule
+// fixed at 330 degrees, like a bathroom scale, so a three o'clock meeting is not at
+// the 3. A straight strip has no such reading to offer, and four hours is simply what
+// stays legible down it at a 15-minute pitch.
 //
 // The dial this replaced had to reason about wraparound: eight hours of a
 // twelve-hour ring was the most that could be shown before a marker could be
-// mistaken for one half a revolution away. A linear track cannot wrap, so the
-// window is simply what stays legible at a 15-minute pitch and nothing more.
+// mistaken for one half a revolution away. Neither of these wraps — a line has no
+// ends to meet, and the arc is a fixed half turn that does not ride with the clock.
 #define STRIP_BACK_S    (1 * 60 * 60)
-#define STRIP_AHEAD_S   (3 * 60 * 60)
+#define STRIP_AHEAD_S   PBL_IF_ROUND_ELSE(5 * 60 * 60, 3 * 60 * 60)
 #define STRIP_SPAN_S    (STRIP_BACK_S + STRIP_AHEAD_S)
-#define STRIP_SPAN_MIN  (STRIP_SPAN_S / 60)   // 240 — one coverage byte each
+// 360 on gabbro, 240 elsewhere — one coverage byte each. PBL_IF_ROUND_ELSE is a
+// preprocessor selection, so this stays an integer constant expression and is still
+// legal as an array bound.
+#define STRIP_SPAN_MIN  (STRIP_SPAN_S / 60)
 #define NOTCH_STEP_MIN  15
 
 // Marker and pointer extents, as percentages of notch_len. They live here

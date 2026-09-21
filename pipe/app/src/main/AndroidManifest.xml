@@ -7,6 +7,14 @@
          can be revoked while the service is running. -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
 
+    <!-- The second source: Nuron's QuestFactsProvider, which serves the next few
+         hours of its quests as the same id/start/duration/kind rows the calendar
+         gives. Declared by Nuron as signature|knownSigner, so this is granted only
+         to a build signed by a certificate on its allowlist — there is no user
+         prompt and no way to obtain it otherwise. It carries no titles: Nuron's
+         provider has no column for one. -->
+    <uses-permission android:name="com.amborjo.questjournal.permission.READ_QUEST_FACTS" />
+
     <!-- Preferred host (API 31+). Associating the watch lets the system bind
          PipeCompanionService for as long as it is nearby, which holds the process open
          without a notification. All three are normal permissions: no prompt, no runtime
@@ -41,6 +49,10 @@
     <queries>
         <package android:name="com.getpebble.android.basalt" />
         <package android:name="com.getpebble.android" />
+        <!-- Nuron, for the same reason: without this its provider is invisible,
+             getPackageInfo throws NameNotFoundException, and NuronSource would
+             report Absent on a phone where Nuron is installed and working. -->
+        <package android:name="com.amborjo.questjournal" />
     </queries>
 
     <application

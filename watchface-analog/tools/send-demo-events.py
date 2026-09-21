@@ -87,6 +87,23 @@ DEMO = [
     (11, 355, 0, EV_TASK, "past it -- must not draw"),
 ]
 
+# Nuron quests, as `pipe` now sends them: the same records, but with bit 31 of the
+# id set. The id space is partitioned so a second source cannot silently replace a
+# calendar entry (see docs/protocol.md, "The second source"), and the point of this
+# set is to prove the watch does not care — a u32 with the high bit set must decode,
+# position, merge and linger exactly as a small one does.
+#
+# It is not a new *marker* case. Nuron entries are ordinary tasks, and if one of
+# these renders differently from its low-id twin the decoder is sign-extending
+# somewhere it should not.
+NURON_BIT = 0x80000000
+
+NURON_DEMO = [
+    (NURON_BIT | 21, 45, 0, EV_TASK, "high-bit id: must draw as an ordinary wedge"),
+    (NURON_BIT | 22, 47, 0, EV_TASK, "2 min from the last -- must still merge"),
+    (NURON_BIT | 23, -30, 0, EV_TASK, "high-bit id, overdue: must take the late colour"),
+]
+
 
 def app_uuid():
     """From package.json, so this keeps working if the UUID ever moves."""
@@ -188,9 +205,10 @@ def pack(records):
     return blob
 
 
-def demo_records(now):
+def demo_records(now, nuron=False):
+    table = DEMO + (NURON_DEMO if nuron else [])
     return [(eid, now + off * 60, dur, kind, OP_UPSERT)
-            for eid, off, dur, kind, _ in DEMO]
+            for eid, off, dur, kind, _ in table]
 
 
 def describe(rec):
@@ -283,6 +301,10 @@ def main():
                     help="send removes for these ids as a delta, without flushing")
     ap.add_argument("--heartbeat", type=int, default=300, metavar="S",
                     help="seconds until the companion next checks in (15-3600)")
+    ap.add_argument("--nuron", action="store_true",
+                    help="add three Nuron entries, whose ids have bit 31 set. "
+                         "They must render identically to the low-id entries; "
+                         "anything else is a sign-extension bug in the decoder.")
     ap.add_argument("--dry-run", action="store_true",
                     help="print the blob and what it says, send nothing")
     opts = ap.parse_args()
@@ -314,7 +336,7 @@ def main():
         records = [(eid, now, 0, EV_TASK, OP_REMOVE) for eid in opts.remove]
         flush = False       # a delta: the watch keeps everything else it holds
     else:
-        records, flush = demo_records(now), True
+        records, flush = demo_records(now, opts.nuron), True
 
     return send(opts, records, flush)
 

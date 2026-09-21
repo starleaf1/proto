@@ -23,8 +23,9 @@
 // sit in a disc at the centre, drawn over the hands: it covers the half of each
 // hand that carries no reading, and it is the only place on the face where text
 // is safe from a hand at every minute. The next turn and whatever is running
-// out share a band under the dial, or the disc's bottom row where the glass is
-// round and there is no under.
+// out share a band under the dial; where the glass is round there is no under,
+// so they share the disc's bottom row instead — one slot, and the first of them
+// that is true is the only one drawn.
 //
 // The watch computes the time, the date and its own battery. Everything else —
 // the calendar, the phone's battery, the next turn — comes from the companion,
