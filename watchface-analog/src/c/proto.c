@@ -15,8 +15,8 @@
 // at the clock angle of each entry's own time. A three o'clock meeting is at the
 // 3. Six hours is half a turn of a twelve-hour dial, so the ring runs at thirty
 // degrees to the hour — the hour hand's own rate — and the hand is therefore the
-// "now" mark by construction. It stops three pixels short of the ring, which stays
-// the markers' lane alone.
+// "now" mark by construction. It ends level with the ticks' outer end, so the ring
+// stays the markers' lane alone.
 //
 // Appointments are arcs, tasks and reminders are wedges that cross the rail and
 // point at the middle of the face. The date and the countdown to the next entry

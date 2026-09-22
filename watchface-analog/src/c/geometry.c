@@ -282,8 +282,8 @@ Layout layout_compute(GRect bounds, GFont date_font, GFont slot_font) {
   if (lo.tick_min < 4) lo.tick_min = 4;
   lo.r_text = lo.tick_out - lo.tick_maj - 2;
 
-  // The hands. The minute hand runs to the rim; the hour hand stops three pixels
-  // short of the ring and never enters it.
+  // The hands. The minute hand runs to the rim; the hour hand ends flush with
+  // the outer end of the ticks and never enters the ring.
   //
   // It reached the ring's mid-depth first, so that a running appointment had the
   // hand's tip physically inside its band. That is a true reading and it cost
@@ -294,10 +294,17 @@ Layout layout_compute(GRect bounds, GFont date_font, GFont slot_font) {
   // band — which is all the reading ever needed, the ring running at the hand's
   // own rate.
   //
+  // Where it stops is the tick lane's own outer end rather than a clearance off
+  // the ring, which is what an hour hand on any analog dial does: the ticks are
+  // the scale it reads against, so tip and graduation share an edge and the eye
+  // has a line to read the hand to. It also puts the whole marker clearance
+  // (`gap`) between the tip and the nearest thing a marker can reach, where
+  // three pixels off r_in left the tip inside that clearance.
+  //
   // Convention holds, the minute hand being the longer of the two, and they are
   // told apart by width, which is what flint has instead of hue.
   lo.hand_m_len = lo.r_out - 1;
-  lo.hand_h_len = lo.r_in - 3;
+  lo.hand_h_len = lo.tick_out;
   // Told apart by width alone, which is what flint has instead of hue, so the
   // ratio between them is what has to survive rather than either number. A
   // twentieth and a fortieth of the radius is seven pixels against three on

@@ -135,7 +135,7 @@ typedef struct {
   int16_t tick_min;    // the other eight
   int16_t r_text;      // nothing outside this is safe from a hand
 
-  int16_t hand_h_len;  // hour hand: three pixels short of the ring, never into it
+  int16_t hand_h_len;  // hour hand: flush with the ticks' outer end, never into the ring
   int16_t hand_m_len;  // minute hand: to the ring's outer edge
   int16_t hand_h_half; // half-widths at the hub, in px
   int16_t hand_m_half;

@@ -231,9 +231,9 @@ is shorter as well as wider for the same reading: `"MON 22"` measures 50x18 in
 
 **flint gives both rows the same size where the other two keep the date a rung above the
 slot.** That display is the one where the disc's radius is dearest per row - it is solved
-from these two rows, drawn over the hands, and the hour hand is 60 px long to begin with.
-Measured: a 24 px date puts the disc at 37 and leaves 23 px of hour hand outside it,
-where 18 px puts it at 34 and leaves 26.
+from these two rows, drawn over the hands, and the hour hand is 56 px long to begin with.
+Measured: a 24 px date puts the disc at 37 and leaves 19 px of hour hand outside it,
+where 18 px puts it at 34 and leaves 22.
 
 ### The launcher icon
 
@@ -318,12 +318,18 @@ Each of these was tried the other way first.
   carries no reading, and it is the only place on the face where text is safe from a
   hand at every minute of the day. This inverts the digital face's rule that nothing
   may cover the now mark — here the now mark is a hand, and the text outranks it.
-- **The hour hand stops three pixels short of the ring; the minute hand crosses it.** It
-  reached the ring's mid-depth first, so that a running appointment had the hand's tip
-  physically inside its band — a true reading that cost more than it was worth. A broad
-  hand lying in the marker lane competes with the markers for the one lane they have,
-  and on `flint`, where both are the same ink, the tip and the band it sat in read as
-  one shape. It still points *at* the band, which is all the reading ever needed.
+- **The hour hand ends level with the ticks' outer end; the minute hand crosses the
+  ring.** It reached the ring's mid-depth first, so that a running appointment had the
+  hand's tip physically inside its band — a true reading that cost more than it was
+  worth. A broad hand lying in the marker lane competes with the markers for the one
+  lane they have, and on `flint`, where both are the same ink, the tip and the band it
+  sat in read as one shape. It still points *at* the band, which is all the reading ever
+  needed. Where it stops is the tick lane's own outer end — `tick_out`, not a clearance
+  measured off the ring — because the ticks are the scale the hand is read against, and
+  a tip sharing an edge with a graduation is what an hour hand does on any analog dial.
+  It also leaves the whole marker clearance between the tip and the deepest a wedge can
+  reach, where three pixels off `r_in` put the tip inside that clearance. Measured on
+  `flint`: 56 px against the ticks' 56, where it was 60.
   Convention holds — the minute hand is still the longer — and the two are told apart by
   width, which is what `flint` has instead of hue.
 - **The hands taper to three quarters, not to a half.** The disc hides everything inside

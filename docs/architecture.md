@@ -75,8 +75,9 @@ Shared by both:
   analog clock rather than an empty scale.
 - **There is no now mark.** Six hours over half a turn is thirty degrees to the hour,
   which is the hour hand's own rate, so the hand points at the present position on the
-  timeline by construction. It stops three pixels short of the ring and never enters it:
-  the markers have one lane and the hand does not compete for it.
+  timeline by construction. It ends level with the ticks' outer end and never enters the
+  ring: the ticks are the scale it is read against, and the markers have one lane the
+  hand does not compete for.
 - **The twelve dial ticks are the ring's scale as well as the clock's.** Graduating the
   ring separately would put two scales in two concentric lanes.
 - **The date and the countdown sit in a disc at the centre**, drawn over the hands. It
@@ -224,8 +225,9 @@ by width because `flint` has nothing else. The spine is not decoration: a quad t
 pixels across does not survive `gpath_draw_filled`, which rasterises by scanline and
 drops whole scanlines from a slanted sliver — measured on `flint`, the minute hand did
 not draw at all for sixteen minutes of every hour, at slopes rather than directions. A
-stroked line is a different rasteriser and is continuous at every angle. The minute hand runs to the rim; the hour hand stops three
-pixels short of the ring, so the marker lane stays the markers' alone.
+stroked line is a different rasteriser and is continuous at every angle. The minute hand runs to the rim; the hour hand ends at
+`tick_out`, level with the outer end of the ticks, so the marker lane stays the
+markers' alone.
 The halo is a grown filled polygon, never a wide stroked outline — a miter at a sharp
 vertex overshoots far enough to cut a background-coloured slot through a band.
 
