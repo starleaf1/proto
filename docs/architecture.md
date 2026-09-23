@@ -7,7 +7,7 @@ companion that feeds them both:
                                                   ┌──────────────────────────────────┐
                                                ┌─►│ watchface-digital/               │
 ┌──────────────────────────────┐  AppMessage   │  │ a timeline down the left edge,   │
-│ Phone companion              │  Heartbeat,   │  │ four hours of it or six, plus a  │
+│ Phone companion              │  Heartbeat,   │  │ four hours of it or five, plus a │
 │ (pipe/, Android)             │  CalEvents,   │  │ clock and three rows beside it   │
 │                              │  CalFlags,    │  └──────────────────────────────────┘
 │ reads the calendar and the   │───────────────┤
@@ -54,17 +54,16 @@ Shared by both:
 
 - **The strip is a timeline down the left edge**, later always lower, notched every
   fifteen minutes with the hours thicker. Four hours on the rectangles — one above the
-  pointer, three below — and six on `gabbro`, one above and five below.
-- **The pointer never moves.** The ruler scrolls past it: at the quarter mark of a
-  straight strip, and at 330° of `gabbro`'s half-turn arc.
-- **`gabbro`'s six hours over half a turn is thirty degrees to the hour**, which is the
-  analog face's rate and an analog clock's own hour spacing. What the two do with it is
-  opposite: there the entry sits at its own clock angle and the hand moves; here the rule
-  is fixed and the scale slides under it, so a three o'clock meeting is *not* at the 3.
-- **The clock is plain digits**, honouring the 12/24-hour setting — level with the
-  pointer on the rectangles, and below it on `gabbro`, where the chord beside the mark is
-  narrower than the digits are wide.
-- The date, the countdown, nav and the warnings stack downward beside the strip.
+  pointer, three below.
+- **The pointer never moves.** The ruler scrolls past it at the quarter mark of a
+  straight strip. On `gabbro` the strip runs the full height of the display and the
+  glass clips both ends, so it reads as carrying on past the edge; the track holds 1.5 h
+  back and 3.5 h ahead, about an hour and three of them visible. It sits left of centre,
+  only as far left as the clock needs to fit beside the pointer.
+- **The clock is plain digits**, honouring the 12/24-hour setting, level with the
+  pointer on every display.
+- The date, the countdown, nav and the warnings stack downward beside the strip,
+  left-aligned against it, on every display.
 
 `watchface-analog/` — **the calendar is fixed and now moves:**
 
@@ -120,8 +119,9 @@ position in the visible window — seconds from its top — to a point on the bo
 the ray angle there. On a rectangle that angle is a constant 270°, which is to say a
 left-edge strip *is* the old dial's nine-o'clock ray: `step_in` moves inward toward the
 content, `step_side` moves along the track, and every primitive written for a ring works
-unchanged. On `gabbro` the angle sweeps half a turn, twelve o'clock round to six. One
-code path, two shapes.
+unchanged. The track is a vertical line on all three displays; on `gabbro` it runs
+the full height of the display, off the glass at both ends, at an x `layout_compute`
+solves so the clock fits beside the pointer.
 
 The cosine correction the dial needed is gone, and its absence is the point of the shape
 rather than an omission. A depth in pixels is only perpendicular to the boundary if the
@@ -131,7 +131,7 @@ vertical edge's, so both of the strip's shapes are square to their own boundary 
 pixel count is already perpendicular.
 
 **Bands** are one representation doing all the work: `uint8_t coverage[]`, one byte per
-*minute* of the visible window — 240 of them on the rectangles and 360 on `gabbro` —
+*minute* of the window — 240 of them, 300 on `gabbro` —
 holding the most prominent thing happening then.
 Overlapping appointments flatten because they write the same array, and `max()` makes a
 merged band inherit the more urgent member's weight. A minute is under a pixel of track
@@ -162,21 +162,14 @@ measured against. It reaches *out* at the track where markers reach *in* from it
 is what keeps the two apart, and it is drawn last, after everything, because the clock is
 pinned to it and the clock's background knockout would otherwise erase it.
 
-**The clock lines up with the pointer's body**, not with the arc point its apex touches —
-identical on a rectangle, and on an arc the ray runs down and to the right, so the mark's
-body sits some way below the point it touches.
+**The clock lines up with the pointer's body**, not with the track point it touches. The
+two agree while the ray is horizontal, which it is on every display now, but the
+measurement is kept on the shape.
 
-On `gabbro` it now lines up with neither. Half a turn puts the rule 30° back from twelve
-o'clock, near the top of the glass, where the chord left beside the strip is about 60 px
-against the ~100 `"00:00"` measures — and no font size recovers it, the chord being
-narrower still further up. So the clock drops to the highest row that will hold it and
-hangs off the mark rather than sitting beside it. The floor is solved from the clock's
-own measured width through `fit_row`'s width rule rather than tuned, so it follows a font
-change by itself, and it falls straight down rather than along the ray because `fit_row`
-gives every round row the same centre column — `y` is the only free variable there. The
-same half turn curls the hour-label lane over the top of the glass and into that row,
-which is why `gabbro` drops the label nearest now exactly as `flint` drops the one under
-its wedge, and loses the same nothing: the clock beside the gap is naming that very hour.
+On `gabbro` the strip's x is solved rather than fixed: it starts at the centre of the
+glass and steps left until the clock's row, level with the pointer, is wide enough for
+`"00:00"`. Stepping left shortens the chord the strip runs on, which lifts the pointer
+toward a wider row, so the first x that fits is the one that costs the strip least.
 
 ### `watchface-analog/` — the analog dial
 
@@ -195,9 +188,9 @@ One window, one layer, one update proc, split across the same shape of module se
 
 `events`, `wire` and `wbatt` are the digital face's files, copied. They carry no
 rendering knowledge, and they only *read* the window constants rather than defining
-them — which is what let the digital face's window become per-platform without the copies
-drifting. It is 1 h and 5 h here; there it is 1 h and 3 h on the rectangles and the same
-1 h and 5 h on `gabbro`.
+them — which is what lets the two windows differ without the copies drifting. It is
+1 h and 5 h here; there it is 1 h and 3 h on the rectangles and 1.5 h and 3.5 h on
+`gabbro`.
 
 **Everything is polar, and there is one angular scale.** `angle_of_time()` maps a
 wall-clock instant to a dial angle — `((minutes % 720) * TRIG_MAX_ANGLE) / 720`, into
@@ -321,13 +314,15 @@ the app says so.
    up knowing nothing. It sends the same flush the tick sends and deliberately leaves the
    alarm alone, because re-arming on a press would slide the declared cadence a full
    period.
-2. `CalendarSource` scans `[now − 2 h, now + 6 h]`, excluding whole-day entries — they
+2. `CalendarSource` scans `[now − 3 h, now + 6 h]`, excluding whole-day entries — they
    have no position on a timeline and no duration that would fit one — and anything
    cancelled. Duration comes from `END - BEGIN`; a zero-length instance is a reminder.
 
-   The phone's window is deliberately wider than any face's — `[now − 1 h, now + 3 h]`
-   on the digital one's rectangles, and `[now − 1 h, now + 5 h]` on its round display
-   and on the analog face. Entries past a face's horizon sit in its table undrawn and
+   The phone's window deliberately covers every face's — `[now − 1 h, now + 3 h]` on
+   the digital one's rectangles, `[now − 3 h, now + 3 h]` on its round display, and
+   `[now − 1 h, now + 5 h]` on the analog face. It reaches back as far as the deepest of
+   them and no further: a flush replaces the watch's table, so anything the scan misses
+   is dropped from a strip that could still show it. Entries past a face's horizon sit in its table undrawn and
    come into view as the window slides, which costs one message instead of one per
    quarter hour, and one scan serves all of them.
 3. `EventDiff` compares the scan against what the companion believes the watch holds.

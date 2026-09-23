@@ -6,34 +6,30 @@
 //
 // Every coordinate on this face derives from the root layer's bounds, so the
 // same code lays out a 144x168 rectangle (flint), a 200x228 one (emery) and a
-// 260x260 circle (gabbro). Only track_at() branches on display shape.
+// 260x260 circle (gabbro). Only layout_compute() and fit_row() branch on display
+// shape: on the circle the strip is a chord, placed so the clock fits beside it.
 // ---------------------------------------------------------------------------
 
-// The visible window: 1 h above the pointer, and below it 3 h on the rectangles and
-// 5 h on gabbro. The pointer never moves — the ruler slides past it, one minute at a
-// time, and that is the whole of the "scrolling".
+// The window: 1 h above the pointer and 3 h below it on the rectangles, 1.5 h and 3.5 h on
+// gabbro. The pointer never moves — the ruler slides past it, one minute at a time, and
+// that is the whole of the "scrolling". Four hours is what stays legible down a straight
+// strip at a 15-minute pitch.
 //
-// It is the one measurement on this face that differs by *platform* rather than by
-// display shape, and the reason is that only one of the two shapes has an hour
-// spacing worth borrowing. gabbro's track is half a turn of the glass, so six hours
-// across it is thirty degrees to the hour — an analog clock's own spacing, and the
-// rate watchface-analog/ runs its ring at. What the two faces do with that rate is
-// still opposite: there every entry sits at the clock angle of its own time and the
-// hour hand is the now mark, so nothing moves; here the scale slides past a rule
-// fixed at 330 degrees, like a bathroom scale, so a three o'clock meeting is not at
-// the 3. A straight strip has no such reading to offer, and four hours is simply what
-// stays legible down it at a 15-minute pitch.
+// gabbro's track runs the full height of the display, not of the glass, so the circle
+// cuts both ends off and the ruler reads as carrying on past the edge rather than as a
+// bar that stops short of it. Five hours over that height is about the rectangles'
+// pitch, and the pointer at three tenths of it sits where the clock fits beside it;
+// what the glass actually shows at the strip's x is roughly an hour back and three
+// ahead, the rectangles' reading.
 //
 // The dial this replaced had to reason about wraparound: eight hours of a
 // twelve-hour ring was the most that could be shown before a marker could be
-// mistaken for one half a revolution away. Neither of these wraps — a line has no
-// ends to meet, and the arc is a fixed half turn that does not ride with the clock.
-#define STRIP_BACK_S    (1 * 60 * 60)
-#define STRIP_AHEAD_S   PBL_IF_ROUND_ELSE(5 * 60 * 60, 3 * 60 * 60)
+// mistaken for one half a revolution away. A line has no ends to meet.
+#define STRIP_BACK_S    PBL_IF_ROUND_ELSE(90 * 60, 1 * 60 * 60)
+#define STRIP_AHEAD_S   PBL_IF_ROUND_ELSE(210 * 60, 3 * 60 * 60)
 #define STRIP_SPAN_S    (STRIP_BACK_S + STRIP_AHEAD_S)
-// 360 on gabbro, 240 elsewhere — one coverage byte each. PBL_IF_ROUND_ELSE is a
-// preprocessor selection, so this stays an integer constant expression and is still
-// legal as an array bound.
+// 240, or 300 on gabbro — one coverage byte each. PBL_IF_ROUND_ELSE is a preprocessor
+// selection, so this stays an integer constant expression and is legal as an array bound.
 #define STRIP_SPAN_MIN  (STRIP_SPAN_S / 60)
 #define NOTCH_STEP_MIN  15
 
@@ -78,19 +74,11 @@
 // It has to clear an hour notch, which is the *thicker* kind, and the halo a marker in
 // the same lane carries — see layout_compute.
 
-// How the text rows sit in their boxes.
-//
-// Left on the rectangles: a column of rows sharing a left edge reads as one
-// block, and the edge is the strip's, which is what every row is beside.
-//
-// Centred on gabbro, because a circle will not have it. There the row boxes are
-// chords, and a chord's left edge moves 66 px between the clock's height and the
-// warnings row's — so a shared left edge is either a staircase or, if one x is
-// forced on all five, narrow enough at the clock's height to clip "00:00". What
-// the circle does give for free is a shared *centre*: `left` and `right` are
-// symmetric about center.x + zone/2 at every height, so centred rows already
-// line up into the column that left-aligning is trying to produce.
-#define ROW_ALIGN PBL_IF_ROUND_ELSE(GTextAlignmentCenter, GTextAlignmentLeft)
+// How the text rows sit in their boxes: left, against the strip, on every display.
+// A column of rows sharing a left edge reads as one block, and the edge is the strip's,
+// which is what every row is beside. On gabbro that edge is still constant — the strip
+// is a vertical line there too — and only the right edge is a chord.
+#define ROW_ALIGN GTextAlignmentLeft
 
 // How far the countdown's sign leaves the line it qualifies: up for a '+', down
 // for a '-'. It is the only mark in the rows whose *position* is part of what it
@@ -117,6 +105,9 @@
 // stationary "now" marker that does not line up with it reads as two unrelated
 // things, and the warnings row is pinned to the bottom. The date and the
 // countdown flow down from the clock, and nav takes whatever is left between.
+//
+// On gabbro "the bottom" is the lowest height where the chord still leaves a usable
+// row, and the strip's x is solved rather than fixed — see layout_compute.
 typedef struct {
   GRect   bounds;
   GPoint  center;
@@ -145,14 +136,10 @@ typedef struct {
 #endif
   int16_t zone;
   int16_t track_px;    // the track's length, for px <-> seconds conversions
-#ifdef PBL_ROUND
-  int16_t arc_r;       // the circle the strip's arc is traced on
-#else
-  int16_t strip_x;     // the track's x
+  int16_t strip_x;     // the track's x; left of centre on gabbro, by as much as the clock needs
   int16_t strip_top;
   int16_t strip_h;
-#endif
-  GRect   num_box;     // HH:MM, centred on the pointer
+  GRect   num_box;     // HH:MM, level with the pointer
   GRect   date_box;
   GRect   count_box;   // countdown; a plain row, sized like any other slot
   GRect   nav_box;
@@ -173,12 +160,10 @@ typedef struct { GPoint p; int32_t a; } Track;
 // `u` is seconds from the top of the visible window, clamped to
 // [0, STRIP_SPAN_S].
 //
-// On a rectangular display the track is the left edge and `a` is a constant
-// 270 degrees. That is not a special case bolted on: a left-edge strip *is* the
-// old dial's nine-o'clock ray, and at 270 degrees step_in() moves +x while
-// step_side() moves +/-y, so every helper written for the ring works here
-// untouched. On gabbro the track is an arc down the left of the circle and `a`
-// sweeps with it.
+// The track is a vertical line and `a` is a constant 270 degrees. That is not a
+// special case bolted on: a left-edge strip *is* the old dial's nine-o'clock ray, and
+// at 270 degrees step_in() moves +x while step_side() moves +/-y, so every helper
+// written for the ring works here untouched.
 Track track_at(const Layout *lo, int32_t u);
 
 // Seconds from the top of the visible window. The replacement for the dial's
@@ -230,9 +215,8 @@ GPoint step_side(GPoint p, int32_t a, int32_t d);
 // sample of a run kept a cap nothing overlapped and every band lost a pixel off all four
 // corners. Pebble has no cap style to set, so the answer is to stop drawing a line.
 //
-// Branches on display shape, and it is track_at()'s split: a filled rect on a rectangle,
-// an annular sector on gabbro's arc, both cut on the ray so a band's end lines up with
-// whatever else sits at the same `u`.
+// A filled rect, cut square on the ray so a band's end lines up with whatever else sits
+// at the same `u`.
 //
 // The colour displays' "now" rule goes through here too. It is the same thing — a span of
 // the track, filled to a depth — and it had the same lozenge ends for the same reason.

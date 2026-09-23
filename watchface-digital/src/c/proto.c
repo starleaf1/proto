@@ -11,17 +11,15 @@
 // ---------------------------------------------------------------------------
 // proto — a calendar-driven watchface.
 //
-// The left edge is a timeline, read downward: one hour behind and three ahead on
-// the rectangles, one behind and five ahead on gabbro, with a pointer that never
-// moves — at the quarter mark of a straight strip, and at 330 degrees of the round
-// one's half-turn arc. Appointments are
+// The left edge is a timeline, read downward: one hour behind and three ahead, with
+// a pointer that never moves at the quarter mark of a straight strip. Appointments are
 // bands spanning their duration with the quarter-hour notches cut through them;
 // tasks and reminders are wedges poking inward off the ruler. See strip.c.
 //
-// The clock is plain digits, centred on the pointer — the strip says where in
+// The clock is plain digits, level with the pointer — the strip says where in
 // the day you are, so the clock only has to say what time it is. The date, the
-// countdown, the next turn and whatever is running out stack beneath it. See
-// slots.c.
+// countdown, the next turn and whatever is running out stack beneath it, left-aligned
+// against the strip. See slots.c.
 //
 // The watch computes the time, the date and its own battery. Everything else —
 // the calendar, the phone's battery, the next turn — comes from the companion,
@@ -30,7 +28,7 @@
 //
 // All geometry derives from the root layer's bounds, so the same code lays out
 // flint (144x168, one ink), emery (200x228) and gabbro (260x260, round, where
-// the strip follows the left arc instead of the left edge).
+// the strip runs off the glass at both ends, left of centre so the clock fits beside it).
 // ---------------------------------------------------------------------------
 
 static Window *s_window;
@@ -52,8 +50,7 @@ static void update_buffers(void) {
   // to show. A stationary pointer cannot carry an hour, so the digits do.
   //
   // No AM/PM. There is no room for it beside the strip at any readable size, and
-  // the strip is already showing hours of context around now — four of them, or six
-  // on gabbro — which is a better answer to "morning or evening?" than two letters.
+  // the strip is already showing hours of context around now — four of them, or five on gabbro — which is a better answer to "morning or evening?" than two letters.
   if (clock_is_24h_style()) {
     strftime(s_time_buf, sizeof s_time_buf, "%H:%M", &s_tm);
   } else {
@@ -149,11 +146,11 @@ static void demo_seed(time_t now) {
   events_upsert(6, now + 160 * 60,  0, EV_TASK);         // 4 min apart -> too close
   events_upsert(7, now + 164 * 60,  0, EV_TASK);         // -> one deeper marker
   events_upsert(8, now + 110 * 60,  0, EV_TASK);         // sits on top of a band
-  // The horizon cases, and they no longer land the same way on all three: the last
-  // three are past it on the rectangles and are gabbro's end-of-window set, the
-  // window being four hours there and six here.
-  events_upsert(9, now + 270 * 60, 90, EV_APPOINTMENT);  // clips at gabbro's end
-  events_upsert(10, now + 295 * 60, 0, EV_TASK);         // just inside gabbro's horizon
+  // The analog face's horizon cases, kept so the two sets stay one set. Every
+  // display here reaches three hours ahead, so all three are past this face's end;
+  // they check that nothing past the horizon draws.
+  events_upsert(9, now + 270 * 60, 90, EV_APPOINTMENT);  // clips at the analog face's end
+  events_upsert(10, now + 295 * 60, 0, EV_TASK);         // just inside the analog horizon
   events_upsert(11, now + 355 * 60, 0, EV_TASK);         // past it: must not draw
 }
 #endif

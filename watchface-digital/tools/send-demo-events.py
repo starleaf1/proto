@@ -14,11 +14,10 @@ must flatten into one, clustered point entries that must merge, an overdue remin
 marker sitting on top of a band, and entries at and past the horizon. **Keep it in step
 with `demo_seed()` in `src/c/proto.c`**; the two are meant to show the same face.
 
-It no longer shows the *same* face on all three platforms, and it cannot: the window is
-four hours on the rectangles and six on gabbro, so the last three entries are the round
-display's horizon cases and are simply three more things off the end of the other two's.
-The three entries are the sibling face's, verbatim — watchface-analog/ has run a
-six-hour window all along, and the two scripts are meant to differ only in prose.
+The last three entries are the sibling face's horizon cases, verbatim — watchface-analog/
+runs five hours ahead, and the two scripts are meant to differ only in prose. This face
+reaches three hours ahead (three and a half on gabbro), so here all three are simply past the end
+and must not draw.
 
     tools/send-demo-events.py                     # flush, then the eleven entries
     tools/send-demo-events.py --emulator gabbro
@@ -86,8 +85,8 @@ DEMO = [
     (6, 160, 0, EV_TASK, "4 min from 7 -- too close to draw apart"),
     (7, 164, 0, EV_TASK, "-> one deeper marker"),
     (8, 110, 0, EV_TASK, "sits on top of a band"),
-    (9, 270, 90, EV_APPOINTMENT, "runs past gabbro's 5 h horizon -- clips at the end"),
-    (10, 295, 0, EV_TASK, "just inside gabbro's horizon"),
+    (9, 270, 90, EV_APPOINTMENT, "past the 3 h horizon (the analog face's end-clip case)"),
+    (10, 295, 0, EV_TASK, "past the horizon (just inside the analog face's)"),
     (11, 355, 0, EV_TASK, "past it -- must not draw"),
 ]
 
@@ -300,7 +299,7 @@ def main():
     ap.add_argument("--list", action="store_true",
                     help="list running emulators and exit")
     ap.add_argument("--clear", action="store_true",
-                    help="flush carrying no records -- 'the next six hours are empty'")
+                    help="flush carrying no records -- 'the window is empty'")
     ap.add_argument("--remove", nargs="+", type=int, metavar="ID",
                     help="send removes for these ids as a delta, without flushing")
     ap.add_argument("--heartbeat", type=int, default=300, metavar="S",

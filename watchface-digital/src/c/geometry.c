@@ -12,7 +12,7 @@
 // the arithmetic says and sitting a pixel short of it.
 //
 // Signed on both operands: the trig products below are direction cosines and are
-// negative over half the arc.
+// negative over half the circle.
 static int32_t div_round(int32_t num, int32_t den) {
   if (den < 0) { num = -num; den = -den; }
   return (num >= 0) ? (num + den / 2) / den : (num - den / 2) / den;
@@ -33,66 +33,11 @@ static int16_t isqrt32(int32_t v) {
   return (int16_t)x;
 }
 
-#ifdef PBL_ROUND
-// The arc the strip is traced on: half a turn down the left of the circle, from the
-// twelve o'clock position at the top to the six o'clock position at the bottom.
-//
-// The span is not a tuning knob any more, it is the reading. Half a turn over a
-// six-hour window is thirty degrees to the hour, which is an analog clock's own hour
-// spacing, so the graduations land where a reader already expects hours to be and the
-// rule at STRIP_BACK_S falls on 330 degrees. The scale is what moves; the rule does
-// not. That is the whole difference from watchface-analog/, whose ring runs at this
-// same rate but pins each entry to the clock angle of its own time.
-//
-// It was 90 degrees at 315, and the comment here used to say a wider span pushes the
-// arc's ends rightward into the content column at exactly the height the clock wants.
-// That was correct and the bill is paid rather than dodged: the clock no longer sits
-// level with the rule (see layout_compute) and the hour-label lane now curls into the
-// clock's own row (see draw_hour_label). Both are stated where they happen.
-#define ARC_TOP_DEG   360
-#define ARC_SPAN_DEG  180
-
-// Where `u` lands on the arc, in trig angles rather than in whole degrees.
-//
-// One function, because two callers have to agree to the pixel: a band's square end is
-// placed by this and so is the notch or the marker it has to line up with. A whole
-// degree of gabbro's arc is 2.2 px, which is a rounding either of them would show.
-//
-// The result is confined to [TRIG_MAX_ANGLE/2, TRIG_MAX_ANGLE] by construction, and
-// that is worth knowing because the sibling face's fill_ring_band() carries a
-// normalise-and-split that this face does not need: its ring rides with the hour hand
-// and straddles twelve o'clock for six hours out of every twelve, where this arc is a
-// fixed half turn that never does. DEG_TO_TRIGANGLE(360) is exactly TRIG_MAX_ANGLE,
-// which sin_lookup() and graphics_fill_radial() both take — the analog face passes it
-// as an end angle as its ordinary case.
-//
-// u * DEG_TO_TRIGANGLE(180) peaks at 21600 * 32768 = 708M, inside int32 with threefold
-// room to spare. It was 235M at a quarter turn of four hours, so the margin is worth
-// re-checking if either constant grows again.
-static int32_t arc_angle(int32_t u) {
-  // Later is lower, so the angle *decreases* down the arc.
-  return DEG_TO_TRIGANGLE(ARC_TOP_DEG)
-       - div_round(u * DEG_TO_TRIGANGLE(ARC_SPAN_DEG), STRIP_SPAN_S);
-}
-
-// Point at radius r, angle a. int32 math before the int16 cast avoids overflow —
-// sin_lookup * r reaches ~7M at gabbro's 125px radius.
-static GPoint point_on_circle(GPoint c, int32_t r, int32_t a) {
-  return GPoint(c.x + (int16_t)div_round(sin_lookup(a) * r, TRIG_MAX_RATIO),
-                c.y - (int16_t)div_round(cos_lookup(a) * r, TRIG_MAX_RATIO));
-}
-#endif
-
 Track track_at(const Layout *lo, int32_t u) {
   if (u < 0) u = 0;
   if (u > STRIP_SPAN_S) u = STRIP_SPAN_S;
-#ifdef PBL_ROUND
-  int32_t a = arc_angle(u);
-  return (Track){ .p = point_on_circle(lo->center, lo->arc_r, a), .a = a };
-#else
   int16_t y = lo->strip_top + (int16_t)div_round(u * (lo->strip_h - 1), STRIP_SPAN_S);
   return (Track){ .p = GPoint(lo->strip_x, y), .a = TRIG_MAX_ANGLE * 3 / 4 };
-#endif
 }
 
 int32_t u_of_px(const Layout *lo, int16_t px) {
@@ -128,9 +73,7 @@ GPoint step_side(GPoint p, int32_t a, int32_t d) {
 // corners. There is no cap style to set on a Pebble line; the fix is not to be drawing a
 // line.
 //
-// One expression per display shape, and it is the same split track_at() makes: a filled
-// rect on a rectangle, an annular sector on gabbro's arc. Both end on the ray, so a
-// band's end lines up with a notch at the same `u` on either shape.
+// A filled rect, ending on the ray, so a band's end lines up with a notch at the same `u`.
 void fill_track_band(GContext *ctx, const Layout *lo, int32_t u0, int32_t u1,
                      int16_t depth, GColor col) {
   if (u0 < 0) u0 = 0;
@@ -138,16 +81,6 @@ void fill_track_band(GContext *ctx, const Layout *lo, int32_t u0, int32_t u1,
   if (u1 < u0 || depth < 1) return;
 
   graphics_context_set_fill_color(ctx, col);
-#ifdef PBL_ROUND
-  // Radii arc_r + BAND_OUT_PX down to arc_r - depth, cut off on the two rays.
-  // graphics_fill_radial sweeps clockwise from start to end and draws nothing if the
-  // start is the larger, and the arc's angle *decreases* as u grows — so the later end
-  // of the band is the one to start from.
-  int16_t r = lo->arc_r + BAND_OUT_PX;
-  graphics_fill_radial(ctx, GRect(lo->center.x - r, lo->center.y - r, 2 * r, 2 * r),
-                       GOvalScaleModeFitCircle, depth + BAND_OUT_PX,
-                       arc_angle(u1), arc_angle(u0));
-#else
   // The +1 is the track's own column: `depth` is measured from it, so the band covers
   // strip_x - BAND_OUT_PX through strip_x + depth *inclusive*.
   int16_t y0 = track_at(lo, u0).p.y;
@@ -155,21 +88,17 @@ void fill_track_band(GContext *ctx, const Layout *lo, int32_t u0, int32_t u1,
   graphics_fill_rect(ctx, GRect(lo->strip_x - BAND_OUT_PX, y0,
                                 depth + BAND_OUT_PX + 1, y1 - y0 + 1),
                      0, GCornerNone);
-#endif
 }
 
 GRect text_plate(GRect box, GFont font, const char *text) {
   if (!text || !text[0]) return GRect(box.origin.x, box.origin.y, 0, 0);
   GSize ts = graphics_text_layout_get_content_size(
       text, font, box, GTextOverflowModeFill, ROW_ALIGN);
-  // A pixel of pad on the leading edge where the row is left-aligned, two everywhere
-  // else. `zone` carries exactly two pixels of clearance past the pointer's base, so
-  // a left-aligned plate reaching two back would sit on the pointer itself.
+  // A pixel of pad on the leading edge, two on the trailing one. `zone` carries exactly
+  // two pixels of clearance past the pointer's base, so a plate reaching two back would
+  // sit on the pointer itself.
   int16_t pad = 2;
-  int16_t x = PBL_IF_ROUND_ELSE(box.origin.x + (box.size.w - ts.w) / 2 - pad,
-                                box.origin.x - 1);
-  int16_t w = PBL_IF_ROUND_ELSE(ts.w + 2 * pad, ts.w + 1 + pad);
-  return GRect(x, box.origin.y, w, box.size.h);
+  return GRect(box.origin.x - 1, box.origin.y, ts.w + 1 + pad, box.size.h);
 }
 
 void knock_out(GContext *ctx, GRect r) {
@@ -185,7 +114,7 @@ void knock_out(GContext *ctx, GRect r) {
 // How much of a wedge's base is drawn as a band rather than left to the polygon.
 // See draw_track_wedge(): two pixels covers the outboard column a band gets and
 // the one a polygon fill and a rect fill disagree about at the same coordinate,
-// with the arc's sagitta — a quarter-pixel on gabbro — inside it either way.
+// on every display.
 #define WEDGE_CAP_D 2
 
 // Move p away from c by d px. Returns p unchanged if they coincide.
@@ -311,13 +240,12 @@ void draw_track_wedge(GContext *ctx, const Layout *lo, int32_t u,
   // an hour notch's cap. Measured on emery, that plus the pixel a gpath fill and a
   // rect fill disagree about at the same coordinate put the base two pixels inboard
   // of the band it was sitting on — enough for the marker to read as floating inside
-  // the appointment rather than standing on it. On gabbro the base is also a chord
-  // of the arc, so its middle falls short by the sagitta on top of that.
+  // the appointment rather than standing on it.
   //
   // None of it is worth arithmetic, and arithmetic could not fix the last of it
   // anyway — two rasterisers at one coordinate do not agree by being asked to. The
   // base is drawn by the call that draws the edge it has to match, so the two land
-  // on the same pixels on both display shapes by construction.
+  // on the same pixels by construction.
   int16_t cap_d = WEDGE_CAP_D;
   if (cap_d > depth) cap_d = depth;
   if (cap_d > 0) {
@@ -328,38 +256,73 @@ void draw_track_wedge(GContext *ctx, const Layout *lo, int32_t u,
 
 // Clamp a full-width row to what the strip and the display leave it at that height.
 //
-// The strip claims a fixed depth inward from the track, so on a rectangle this is a
-// constant inset from the left plus the edge margin on the right. On a circle it is
-// neither: the arc's x varies with y and so does the chord's right edge, and both are
-// tightest at whichever edge of the row sits *furthest* from the vertical centre —
-// the arc is leftmost at nine o'clock, so a row above or below that has the arc
-// pushed rightward into it, and the chord narrowing at the same time. Measuring at
-// that edge is pessimistic within the row, which is what is wanted.
-//
-// One chord, measured on the one circle the strip and the glass share, with `zone` taken
-// off the left. That is also what keeps the round display's rows in a column: `left` and
-// `right` are symmetric about center.x + zone/2 at every height, so rows whose available
-// width varies by a factor of two still share a centre. It is the property the circle
-// offers in place of the shared left edge it will not have — see ROW_ALIGN.
+// The left edge is the strip's plus `zone` on every display, because the strip is a
+// vertical line on every display. The right edge is the screen's less the margin on a
+// rectangle; on the circle it is the chord, measured at whichever edge of the row sits
+// *furthest* from the vertical centre — pessimistic within the row, which is what is
+// wanted.
 static GRect fit_row(GRect box, const Layout *lo) {
+  int16_t left = lo->strip_x + lo->zone;
 #ifdef PBL_ROUND
   int16_t mid = box.origin.y + box.size.h / 2;
   int16_t far = (mid < lo->center.y) ? box.origin.y
                                     : (int16_t)(box.origin.y + box.size.h);
   int16_t dy = far - lo->center.y;
   if (dy < 0) dy = -dy;
-  int16_t half = (dy < lo->arc_r)
-      ? isqrt32((int32_t)lo->arc_r * lo->arc_r - (int32_t)dy * dy) : 0;
-  int16_t left  = lo->center.x - half + lo->zone;
+  int16_t r = lo->radius - lo->margin;
+  int16_t half = (dy < r) ? isqrt32((int32_t)r * r - (int32_t)dy * dy) : 0;
   int16_t right = lo->center.x + half;
-  if (right < left) right = left;
-  return GRect(left, box.origin.y, right - left, box.size.h);
 #else
-  int16_t left = lo->strip_x + lo->zone;
   int16_t right = lo->bounds.origin.x + lo->bounds.size.w - lo->margin;
+#endif
   if (right < left) right = left;
   return GRect(left, box.origin.y, right - left, box.size.h);
+}
+
+#ifdef PBL_ROUND
+// Put gabbro's strip at `x`, running the full height of the display. The glass is a
+// circle inside that square, so both ends of the track are off the glass and the ruler
+// runs out under the edge rather than stopping short of it — see STRIP_BACK_S.
+static void place_strip(Layout *lo, int16_t x) {
+  lo->strip_x = x;
+  lo->strip_top = lo->bounds.origin.y;
+  lo->strip_h = lo->bounds.size.h;
+  lo->track_px = lo->strip_h;
+}
 #endif
+
+// Where the clock's box goes, for the strip as it is placed: its ink level with the
+// pointer's body.
+//
+// A content box is not symmetric about the glyphs in it: Pebble's font resources
+// carry their own ascent and descent, and a digits-and-colon subset never puts
+// anything below the baseline, so the box has more slack above the ink than
+// below and centring the box leaves the digits sitting low. Measured off a
+// flint screenshot: with the box centred on the pointer at y 43, the ink came
+// out spanning 31..59 — centre 45, two pixels down.
+//
+// The correction is a fraction of the numeral's own height rather than a pixel
+// count, so it scales with the font, and it is measured rather than derived: the
+// TTF's hhea metrics predict the opposite sign, because what the SDK lays out to
+// is the generated resource's metrics and not the source font's.
+//
+// And it goes on the *pointer*, not on the point of the track the pointer marks.
+// The ray is horizontal on every display now, so those are the same y, but the
+// measurement stays on the shape: the eye lines up with the shape, so the shape is
+// what to measure — whichever shape this display's "now" is. On colour that is a rule
+// struck across the strip and its middle is half its length in; on flint it is the
+// wedge, whose body starts past the notch zone.
+static int16_t clock_top(const Layout *lo, int16_t ns_h, int16_t num_h, int16_t span_top) {
+  Track ptr = track_at(lo, STRIP_BACK_S);
+#ifdef PBL_COLOR
+  int16_t p_mid = lo->rule_len / 2;
+#else
+  int16_t p_mid = lo->ptr_tip + lo->notch_len * POINTER_LEN_PCT / 100 / 2;
+#endif
+  int16_t py = step_in(ptr.p, ptr.a, p_mid).y;
+  int16_t top = py - num_h / 2 - ns_h / 20;
+  if (top < span_top) top = span_top;
+  return top;
 }
 
 Layout layout_compute(GRect bounds, GFont num_font, GFont date_font,
@@ -388,9 +351,6 @@ Layout layout_compute(GRect bounds, GFont num_font, GFont date_font,
   // either way: what the strip claims inward from the track, all of it, reserved
   // before any row is placed, because a row placed into it would be knocked out from
   // under the elements the timeline is read off.
-#ifndef PBL_COLOR
-  int16_t p_len = lo.notch_len * POINTER_LEN_PCT / 100;
-#endif
 #ifdef PBL_COLOR
   // The rule strikes through exactly what the strip draws and no further, and a merged
   // marker is the deepest of that. The labels then start past all of it, so nothing is
@@ -408,24 +368,14 @@ Layout layout_compute(GRect bounds, GFont num_font, GFont date_font,
   lo.label_x = lo.notch_len + margin;
   lo.ptr_tip = lo.notch_len + POINTER_TIP_GAP;
   int16_t label_end = lo.label_x + lo.label_w;
-  int16_t ptr_end = lo.ptr_tip + p_len;
+  int16_t ptr_end = lo.ptr_tip + lo.notch_len * POINTER_LEN_PCT / 100;
   lo.zone = (label_end > ptr_end ? label_end : ptr_end) + margin;
 #endif
 
-#ifdef PBL_ROUND
-  lo.arc_r = lo.radius - margin;
-  // The arc's own length: 2*pi*r scaled by ARC_SPAN_DEG/360, which is 314/100 of the
-  // radius per half turn. Derived from the span rather than written out, because these
-  // two have to move together — u_of_px() is what turns a marker's half-width, a halo
-  // and the rule's own thickness into track-seconds, so a stale length quietly doubles
-  // every one of them. Bit-identical to the 157/100 this replaced when the span was 90.
-  lo.track_px = (int16_t)((int32_t)lo.arc_r * 314 * ARC_SPAN_DEG / 18000);
-#else
   lo.strip_x = bounds.origin.x + margin;
   lo.strip_top = bounds.origin.y + margin;
   lo.strip_h = bounds.size.h - 2 * margin;
   lo.track_px = lo.strip_h;
-#endif
 
   // Representative strings, not the live ones: no row may shift as the day or the
   // countdown changes. The countdown's own string carries its sign, because the sign is
@@ -440,20 +390,44 @@ Layout layout_compute(GRect bounds, GFont num_font, GFont date_font,
   GSize ss = graphics_text_layout_get_content_size(
       "+00:00", slot_font, measure, GTextOverflowModeFill, GTextAlignmentCenter);
 
-  int16_t span_top = bounds.origin.y + margin;
-  int16_t span_bot = bounds.origin.y + bounds.size.h - margin;
-#ifdef PBL_ROUND
-  // The circle pinches the rows in as well as the strip; keep them where a chord is
-  // still wide enough to hold text at all.
-  int16_t min_half = lo.arc_r * 45 / 100;
-  int16_t dy_max = isqrt32((int32_t)lo.arc_r * lo.arc_r - (int32_t)min_half * min_half);
-  span_top = lo.center.y - dy_max;
-  span_bot = lo.center.y + dy_max;
-#endif
-
   int16_t num_h = ns.h + 6;
   int16_t date_h = ds.h + 4;
   int16_t slot_h = ss.h + 4;
+
+#ifdef PBL_ROUND
+  // gabbro's strip is a vertical line the height of the display, left of centre by as
+  // much as the clock needs and no more.
+  //
+  // It cannot simply go where the rectangles put theirs. Hard against the left of a
+  // circle the glass shows only a short stretch of a vertical line, and the strip would
+  // lose most of its visible length for nothing; in the middle of the glass there is no room for "00:00" beside it. So
+  // the x is solved: start at the centre and step left until the clock's row, level
+  // with the pointer, is as wide as the clock. The further left, the less of the track
+  // the glass shows, so the first x that fits is the one that costs the strip least.
+  int16_t r = lo.radius - margin;
+  int16_t x_min = bounds.origin.x + margin;
+  int16_t min_half = r * 45 / 100;
+  int16_t span_top = lo.center.y - isqrt32((int32_t)r * r - (int32_t)min_half * min_half);
+  int16_t x = lo.center.x;
+  for (; x > x_min; x--) {
+    place_strip(&lo, x);
+    int16_t t = clock_top(&lo, ns.h, num_h, span_top);
+    if (fit_row(GRect(bounds.origin.x, t, bounds.size.w, num_h), &lo).size.w
+        >= ns.w + margin) break;
+  }
+  place_strip(&lo, x);
+
+  // The bottom of the usable span: the lowest height at which the chord still leaves a
+  // row as wide as a slot's representative string. Below that the glass narrows faster
+  // than the rows can shrink, and the warnings row pinned there would clip.
+  int16_t need_half = lo.strip_x + lo.zone + ss.w + margin - lo.center.x;
+  if (need_half < 0) need_half = 0;
+  if (need_half > r) need_half = r;
+  int16_t span_bot = lo.center.y + isqrt32((int32_t)r * r - (int32_t)need_half * need_half);
+#else
+  int16_t span_top = bounds.origin.y + margin;
+  int16_t span_bot = bounds.origin.y + bounds.size.h - margin;
+#endif
 
   // The countdown is an ordinary row now. It used to reserve a strip under the digits
   // for a progress bar — unconditionally, because the bar only drew while an
@@ -480,67 +454,12 @@ Layout layout_compute(GRect bounds, GFont num_font, GFont date_font,
   int16_t gap_n = ns.h / 5;
   int16_t gap_d = ds.h / 4;
 
+  // The clock's ink goes level with the pointer's body — see clock_top().
+  int16_t top = clock_top(&lo, ns.h, num_h, span_top);
+
   // Pinned at both ends. The clock's centre goes on the pointer; the warnings row
   // goes on the bottom.
   lo.warn_box = GRect(bounds.origin.x, span_bot - slot_h, bounds.size.w, slot_h);
-
-  // The clock's *ink* goes on the pointer, not its content box.
-  //
-  // A content box is not symmetric about the glyphs in it: Pebble's font resources
-  // carry their own ascent and descent, and a digits-and-colon subset never puts
-  // anything below the baseline, so the box has more slack above the ink than
-  // below and centring the box leaves the digits sitting low. Measured off a
-  // flint screenshot: with the box centred on the pointer at y 43, the ink came
-  // out spanning 31..59 — centre 45, two pixels down.
-  //
-  // The correction is a fraction of the numeral's own height rather than a pixel
-  // count, so it scales with the font, and it is measured rather than derived: the
-  // TTF's hhea metrics predict the opposite sign, because what the SDK lays out to
-  // is the generated resource's metrics and not the source font's.
-  // And it goes on the *pointer*, not on the point of the track the pointer marks.
-  //
-  // Those are the same y on a rectangle, where the ray is horizontal and the mark
-  // reaches straight in. On gabbro's arc they are not: the ray at the mark runs down
-  // and to the right, so the mark's body sits some way below the arc point it
-  // touches, and a clock levelled with that point reads as sitting above the thing it
-  // is supposed to line up with. The eye lines up with the shape, so the shape is
-  // what to measure — whichever shape this display's "now" is. On colour that is a
-  // rule struck across the strip and its middle is half its length in; on flint it is
-  // the wedge, whose body starts past the notch zone.
-  Track ptr = track_at(&lo, STRIP_BACK_S);
-  int16_t p_mid = PBL_IF_COLOR_ELSE(lo.rule_len / 2, lo.ptr_tip + p_len / 2);
-  int16_t py = step_in(ptr.p, ptr.a, p_mid).y;
-
-  int16_t top = py - num_h / 2 - ns.h / 20;
-  if (top < span_top) top = span_top;
-
-#ifdef PBL_ROUND
-  // And on gabbro it is levelled with the mark no longer, because the circle will not
-  // have it. A half-turn arc puts the rule 30 degrees back from twelve o'clock, which
-  // is near the top of the glass, and fit_row() leaves a row up there about 60 px of
-  // chord against the ~100 that "00:00" measures. No font size recovers it: to put the
-  // clock's ink level with the rule the box would have to start where the usable chord
-  // is thinner than the clock is wide. So the clock falls to the highest position that
-  // will hold it and hangs off the mark instead of sitting beside it.
-  //
-  // It falls straight down, not along the ray, and the difference is worth being exact
-  // about: fit_row() centres every round row on center.x + zone/2 at every height, so
-  // x is not a free variable here and y is the only thing this can choose.
-  //
-  // Solved, not chosen — it is fit_row()'s own width rule (2*half - zone >= ns.w) read
-  // backwards, so it follows a font change on its own the way the sibling face's disc
-  // radius does. isqrt32() truncates, which makes dy smaller and `top` larger, so the
-  // rounding falls on the safe side; it returns 0 for a negative argument, so a font
-  // set too wide for any chord lands on the centre line rather than on garbage. The
-  // margin is the row's slack, and on gabbro there are about 9 px of it: FONT_NUM
-  // cannot be raised any further, and every pixel label_w grows comes straight out of
-  // this, label_w being inside `zone`.
-  int16_t need_half = (ns.w + lo.zone) / 2 + margin;
-  int16_t fit_dy = (need_half < lo.arc_r)
-      ? isqrt32((int32_t)lo.arc_r * lo.arc_r - (int32_t)need_half * need_half) : 0;
-  int16_t clock_top_min = lo.center.y - fit_dy;
-  if (top < clock_top_min) top = clock_top_min;
-#endif
 
   int16_t room = lo.warn_box.origin.y - top - 2;
   int16_t fixed = num_h + date_h + count_h;

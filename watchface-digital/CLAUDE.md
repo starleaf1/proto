@@ -82,26 +82,21 @@ overlapping bands that must flatten into one, two point entries too close to dra
 that must merge, an overdue reminder above the pointer, a marker sitting on top of a
 band, and three entries at and past the horizon.
 
-**The set no longer shows the same face on all three platforms, and it cannot.** The
-window is four hours on the rectangles and six on `gabbro`, so the last three entries
-(ids 9-11) are the round display's horizon cases — a band clipping at the end of the arc,
-a marker just inside the horizon and one past it — and are simply three more things off
-the end of the other two. They are `watchface-analog/`'s three verbatim, that face having
-run a six-hour window all along, which leaves the two by-copy scripts differing in prose
-alone.
+**The last three entries (ids 9-11) are past the horizon on every display.** They are
+`watchface-analog/`'s horizon cases verbatim — that face reaches five hours ahead — which
+leaves the two by-copy scripts differing in prose alone. This face reaches three
+hours ahead on the rectangles and three and a half on `gabbro`, so here they only check
+that nothing past the end draws.
 
-Neither way seeds a band clipped at the *top* of the window, which on `gabbro` is the arc
-end at twelve o'clock and the one place `graphics_fill_radial` is handed exactly
-`TRIG_MAX_ANGLE`. It cannot be added without wrecking the cases above it — anything
-clipped at `u = 0` is by definition running now, so it merges with id 1's band. Check it
-by hand when the arc changes: `--clear`, then one appointment starting 90 minutes ago and
-running 150.
+Neither way seeds a band clipped at the *top* of the window. Check it by hand when the
+track changes: `--clear`, then one appointment starting an hour and a half ago and
+running three.
 
 ```bash
 # Over the wire, against an ordinary build — preferred
 tools/send-demo-events.py                    # the running emulator, or start one
 tools/send-demo-events.py --emulator flint   # a specific device codename
-tools/send-demo-events.py --clear            # flush with no records: an empty six hours
+tools/send-demo-events.py --clear            # flush with no records: an empty window
 tools/send-demo-events.py --remove 1 5       # delta, no flush
 tools/send-demo-events.py --dry-run          # print the blob and what it says
 tools/send-demo-events.py --list             # which emulators are up, and how
@@ -282,10 +277,9 @@ There are two files because the selector runs an icon in a different mode per pl
 - **The icon says what the face says, in the face's own vocabulary:** the rail down the
   left with its hour notches, a running band, a task as a blunt wedge, and now a quarter
   of the way down — a red rule where there is colour and a wedge reaching out at the
-  rail on `flint`, the same split the face itself makes. It stays a straight rail at the
-  quarter mark even though `gabbro`'s face is now an arc at 330°: the colour icon is one
-  resource shared with `emery`, 25x25 leaves no room to say "half a turn" anyway, and
-  what the icon carries is the vocabulary, not the shape.
+  rail on `flint`, the same split the face itself makes. A straight rail with now at the
+  quarter mark is what all three faces draw, so the one colour icon shared by `emery` and
+  `gabbro` is a thumbnail of both.
 
 `flint` and `emery` share `GOTHIC_14` for the hour lane, and on `flint` that is free:
 `zone` there is closed by the wedge and not by the labels, so any lane up to about
@@ -318,58 +312,38 @@ code; this is the index.
   changed.** See `track_at` in `geometry.c`. At `a = TRIG_MAX_ANGLE * 3 / 4`, `step_in`
   moves `+x` — inward, toward the content column — and `step_side` moves `∓y` along the
   track, so bands, markers and the pointer are drawn by exactly the same primitives that
-  drew them around a ring. One renderer covers a straight edge and `gabbro`'s arc.
+  drew them around a ring. The track is a vertical line on all three displays.
 - **There is no cosine correction any more, and that is not an oversight.** The dial
   needed `depth_along_ray` because a ray leaving a *rectangle* at an angle is not square
   to the edge it leaves through, so a fixed depth presented only cos(θ) of itself and a
-  band measured 1.8× thinner at a corner. Both of the strip's shapes are square to their
-  own boundary — a circle's ray is its normal, and so is a vertical edge's — so a depth
-  in pixels is already perpendicular everywhere. Deleting it was the point of the shape,
-  not a regression.
-- **`gabbro`'s strip curves along the left arc; the other two are straight.** See
-  `ARC_SPAN_DEG` in `geometry.c`. It is half a turn, twelve o'clock round to six, and the
-  span is no longer a tuning knob — it is the reading. Half a turn over six hours is
-  thirty degrees to the hour, an analog clock's own hour spacing, so the graduations land
-  where a reader already expects hours and the rule falls on 330°. What moves is the
-  scale, not the rule, which is the whole difference from `watchface-analog/`: that face
-  runs the same rate and pins each entry to the clock angle of *its own* time.
-
-  This entry used to read "90° is tuned, not arbitrary — a wider span pushes the arc's
-  ends rightward into the content column at exactly the clock's height and costs a whole
-  font size", and that was **correct**. The bill is paid, not dodged, and the two entries
-  below are the invoice. What changed is what the span buys: a borrowed hour spacing was
-  worth more than the chord it costs.
+  band measured 1.8× thinner at a corner. A vertical strip is square to its own
+  boundary, so a depth in pixels is already perpendicular everywhere. Deleting it was the
+  point of the shape, not a regression.
+- **`gabbro`'s strip is straight, like the others, and left of centre by a solved
+  amount.** See `layout_compute` and `place_strip` in `geometry.c`. On a circle a vertical
+  line is a chord, so the rectangles' "hard against the left edge" would throw most of the
+  strip's length away, and in the middle of the glass there is no room for `"00:00"`
+  beside the rule. So the strip starts at the centre and steps left one pixel at a time
+  until the clock's row, level with the rule, is as wide as the clock plus `margin`. The
+  first x that fits costs the strip least, since the further left, the less of the track
+  the glass shows. This replaced a half-turn arc with a six-hour window and the rule at
+  nine o'clock.
+- **`gabbro`'s track is taller than the glass, on purpose.** It runs the full 260 px of
+  the display, so the circle clips both ends and the ruler reads as carrying on past the
+  edge. Stopping it inside the glass left empty space above and below and made it read as
+  a short bar. The window is 1.5 h back and 3.5 h ahead (`STRIP_BACK_S` /
+  `STRIP_AHEAD_S`), which keeps about the rectangles' pitch over that height and puts the
+  rule at three tenths of the way down, where the clock fits; what the glass shows at the
+  strip's x is about an hour back and three ahead.
+- **`gabbro`'s bottom row sits where the chord still holds a slot.** `span_bot` is the
+  lowest height at which `fit_row` leaves the width of `"+00:00"` in the slot font, so
+  the warnings row pinned there cannot clip. The rows below the clock are the
+  rectangles' downward stack otherwise.
 - **The clock lines up with the pointer's *body*, not with the point of the track it
-  marks — except on `gabbro`, where it lines up with neither.** See `layout_compute`.
-  Identical on a rectangle, where the ray is horizontal; on an arc the ray runs down and
-  to the right, so the mark's body sits some way below the arc point it touches, and a
-  clock levelled with the apex reads as floating above it.
-
-  On `gabbro` the rule is now 30° back from twelve o'clock, near the top of the glass,
-  and `fit_row` leaves a row up there about 60 px of chord against the ~100 `"00:00"`
-  measures in `LECO_36`. No font size recovers it: level with the rule the box would have
-  to start where the usable chord is thinner than the clock is wide. So the clock drops
-  to the highest row that will hold it — about 24 px below the rule — and hangs off the
-  mark rather than sitting beside it. The floor is **solved**, from `fit_row`'s own width
-  rule read backwards through `isqrt32`, so it follows a font change by itself the way
-  `watchface-analog/`'s disc radius does. It falls straight *down*, not along the ray,
-  and the difference matters when reading the code: `fit_row` centres every round row on
-  `center.x + zone/2` at all heights, so `y` is the only free variable there.
-- **`gabbro` drops the hour label nearest now, and so does `flint`, for the same reason
-  by a different route.** See `draw_hour_label`. The label lane is a circle of its own,
-  and over half a turn it curls across the top of the glass and into the clock's row; the
-  rows are drawn after the strip and knock out their own footprint, so what survives the
-  meeting is a sliver of a digit, which reads as damage rather than as a number. Dropped,
-  it loses the same nothing `flint`'s does — the clock beside the gap is showing that
-  very hour.
-
-  Tested against `num_box` and `warn_box` only, **never** all five rows: the lane passes
-  within a pixel of `date_box`'s left edge around two hours ahead, so a blanket test
-  starts eating mid-window labels the moment `label_w` measures a pixel wider than
-  expected. And the `warn_box` half is gated on `slots_warn_active()`, because that row
-  is conditional and a row that draws nothing knocks nothing out — testing it
-  unconditionally would delete the last hour of the window for the first twenty minutes
-  of every hour to protect it from something usually not there.
+  marks.** See `clock_top` in `geometry.c`. The ray is horizontal on every display, so
+  the two are the same y today; the measurement stays on the shape because the eye lines
+  up with the shape, and a track that is not horizontal would otherwise leave the clock
+  floating off the mark.
 - **The clock is centred on its ink, not on its content box, and the correction is
   measured rather than derived.** See `layout_compute`. A digits-and-colon subset never
   descends below the baseline, so the box has more slack above the glyphs than below and
@@ -378,9 +352,9 @@ code; this is the index.
   resource's metrics, not the source font's.
 - **Coverage is one byte per minute, not per pixel or per degree.** See `s_cov` in
   `strip.c`. A minute is under a pixel of track on all three displays, so quantising to
-  one is free. 241 bytes on the rectangles — less than the dial's 360 — and 361 on
-  `gabbro`, whose window is six hours; the array is sized from `STRIP_SPAN_MIN`, as is
-  `s_hours`, which a literal six overran by one the moment the window grew.
+  one is free. 241 bytes, 301 on `gabbro` — less than the dial's 360; the array is sized from
+  `STRIP_SPAN_MIN`, as is `s_hours`, which a literal six once overran by one when a
+  window grew.
 - **A band is filled per *run* of equal-weight minutes, not stroked per minute.** See
   `draw_bands` in `strip.c` and `fill_track_band` in `geometry.c`. The per-minute version
   was the ring's per-degree technique carried over: 241 thick lines spaced under a pixel
@@ -415,16 +389,11 @@ code; this is the index.
   band's outer edge does not — it sits `BAND_OUT_PX` outboard of it — and on top of that
   a gpath fill and a rect fill disagree about the pixel at the same coordinate. Measured
   on `emery`, the base came out two pixels inboard of the band under it, which reads as
-  the marker floating inside the appointment rather than standing on it. On `gabbro` the
-  base is also a chord of the arc, so its middle falls short by the sagitta as well.
+  the marker floating inside the appointment rather than standing on it.
   Arithmetic cannot close the last of it — two rasterisers at one coordinate do not agree
   by being asked to — so the base borrows the call that draws the edge it has to match,
-  and lands on the same pixels on both display shapes by construction. `watchface-analog/`
+  and lands on the same pixels by construction. `watchface-analog/`
   caps its ring wedges the same way and for the same reason.
-- **`gabbro`'s arc angles are trig angles, not whole degrees.** See `arc_angle` in
-  `geometry.c`. One degree of that arc is 2.2 px, so a band's square end and the notch it
-  has to line up with cannot each round to a degree of their own. `track_at` and
-  `fill_track_band` both go through the one function.
 - **Every stroke width goes through `stroke_px()`, and comes back odd.** See
   `geometry.h`. The SDK supports odd widths only — an even one is stored as asked but
   the drawing routines round it down, so a requested 4 reaches the screen as 3 and
@@ -526,8 +495,8 @@ code; this is the index.
   hour, a few pixels to the right of the gap. Dropping any other label would lose
   information; dropping this one loses a repetition.
 - **An hour label is placed by the same `step_in` the markers use, and branches on
-  nothing.** `label_x` is a depth along the ray, so the lane is vertical on a rectangle
-  and curves with the arc on `gabbro` for free. Its vertical correction is `ts.h / 6`, not
+  nothing.** `label_x` is a depth along the ray, so the lane is a vertical column
+  beside the strip. Its vertical correction is `ts.h / 6`, not
   the clock's `ts.h / 20`: Gothic keeps more of its box above the caps than LECO does,
   and at this size that difference is the whole correction. Measured off a flint
   screenshot — in a 14 px `GOTHIC_14` box the digits ink rows 5 to 13, so all five pixels
@@ -638,13 +607,11 @@ code; this is the index.
 - **The date is `%a %d`, not `%a %d %b`.** There is not room for the month at a readable
   size beside the strip on any of the three platforms — `gabbro`'s chord at the date's
   height is the tightest.
-- **The rows are left-aligned on the rectangles and centred on `gabbro`.** See `ROW_ALIGN`
-  in `geometry.h`. It is not a shape that was given up on: a chord's left edge moves 66 px
-  between the clock's height and the warnings row's, so one shared left edge there is
-  either a staircase or, if a single x is forced on all five rows, narrow enough at the
-  clock's height to clip `"00:00"`. What the circle does give free is a shared *centre* —
-  `fit_row`'s left and right are symmetric about `center.x + zone/2` at every height — so
-  centred rows already line up into the column that left-aligning is after.
+- **The rows are left-aligned against the strip on all three displays**, `gabbro`
+  included. See `ROW_ALIGN` in `geometry.h`. The strip is a vertical line there too, so
+  `fit_row`'s left edge is `strip_x + zone` at every height and only the right edge is a
+  chord. `gabbro` used to centre its rows, because on the arc a shared left edge was a
+  staircase; a straight strip gives the shared edge back.
 - **Row spacing is a signed gap, and it starts positive.** See `gap_n`/`gap_d` in
   `layout_compute`. It used to be negative on purpose: the rows overlapped by a tenth of
   the row above, because a content box is taller than the ink in it and the gaps read
@@ -663,8 +630,7 @@ Single window, single layer, one update proc. Every repaint is
 **Nothing animates, and the strip "scrolls" anyway.** The only tick is `MINUTE_UNIT`.
 Scrolling is not an animation but a consequence of the mapping: every position on the
 track is `f(t - now)`, so recomputing it once a minute slides the whole ruler past a
-pointer that is pinned a quarter of the way down a straight strip, or 30° back from
-twelve o'clock on `gabbro`'s arc. The same tick advances the countdown
+pointer that is pinned a quarter of the way down a straight strip. The same tick advances the countdown
 and retires whatever has aged out, because every marker's position, prominence and
 existence is a function of `now`. The previous design's flash subsystem
 and its `app_focus_service` subscription are both gone — there is nothing sub-minute

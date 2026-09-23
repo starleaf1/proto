@@ -143,13 +143,11 @@
 // One rung below emery's clock, as before: emery's row is the full width of the screen
 // and this one is a chord of it.
 //
-// That chord is the binding constraint now, not an aside. Since the arc became half a
-// turn the clock sits as high as its own width lets it — layout_compute solves the floor
-// from ns.w and `zone` — and the row it lands on has about nine pixels to spare. So
-// FONT_NUM cannot go up, and FONT_TICK is not free either: label_w is inside `zone`, so
-// every pixel the hour lane gains comes straight out of the clock's slack. Change either
-// and re-measure on the emulator before trusting it; the failure is silent, graphics_
-// draw_text wrapping the minutes onto a second line rather than complaining.
+// That chord is what places the strip. layout_compute steps the strip left from the
+// centre of the glass until the clock's row, level with the pointer, is as wide as
+// ns.w — so every pixel FONT_NUM gains, and every pixel the hour lane gains (label_w is
+// inside `zone`), pushes the strip further left, where the chord and so the strip itself
+// are shorter. Change either and re-measure on the emulator before trusting it.
 #  define FONT_NUM   FONT_KEY_LECO_36_BOLD_NUMBERS
 #  define FONT_DATE  FONT_KEY_GOTHIC_28_BOLD
 #  define FONT_SLOT  FONT_KEY_GOTHIC_24_BOLD

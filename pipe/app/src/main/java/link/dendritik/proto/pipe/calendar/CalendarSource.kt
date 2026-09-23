@@ -13,9 +13,10 @@ import link.dendritik.proto.pipe.protocol.WireIds
 /**
  * Reads the next few hours out of `CalendarContract`.
  *
- * The window matches what the watch can draw — six hours forward, two back to cover
- * the linger a passed marker gets — so a scan is small and a diff between two scans
- * is smaller. Whole-day entries are excluded in the query: they have no position on
+ * The window matches what the watch can draw — six hours forward, three back to cover
+ * the linger a passed marker gets, which is as far back as the deepest face looks
+ * (the digital face on the round display, three hours either side of now) — so a
+ * scan is small and a diff between two scans is smaller. Whole-day entries are excluded in the query: they have no position on
  * a twelve-hour dial.
  *
  * Framework types stop here. Everything downstream sees [EventFacts], which is what
@@ -106,7 +107,7 @@ class CalendarSource(private val context: Context) {
         const val TAG = "CalendarSource"
 
         const val WINDOW_AHEAD_MS = 6 * 60 * 60 * 1000L
-        const val WINDOW_BACK_MS = 2 * 60 * 60 * 1000L
+        const val WINDOW_BACK_MS = 3 * 60 * 60 * 1000L
 
         const val FNV_OFFSET = -0x7EE3623B   // 2166136261 as a signed Int
         const val FNV_PRIME = 16777619

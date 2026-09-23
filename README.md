@@ -5,15 +5,15 @@ together in one repository. Same calendar, two readings of it.
 
 **`watchface-digital`** reads the left edge of the display as a timeline running
 downward, notched every fifteen minutes, with a pointer that never moves — the ruler
-slides past it as the clock advances. On the two rectangles it is a **four-hour**
-window, one hour behind and three ahead, on a straight edge with the pointer at the
-quarter mark. On the round display it is **six hours** on a half-turn arc from the
-twelve o'clock position to the six, which puts it at **thirty degrees to the hour** —
-an analog clock's own spacing, read like a bathroom scale, with the red rule fixed at
-330°. Appointments are bands spanning their duration; tasks and reminders are wedges
-poking inward off the ruler. Beside it a digital clock — level with the pointer on the
-rectangles, below it on the circle, where the glass has no room for both — then the
-date, a countdown, the next turn, and whatever is running out, stacked downward.
+slides past it as the clock advances. On the rectangles it is a **four-hour** window,
+one hour behind and three ahead, on a straight vertical strip with the pointer at the
+quarter mark. On the round display the strip is just as straight but runs the full
+height of the display, so the glass cuts off both ends and the ruler reads as carrying
+on past the edge (1.5 h behind and 3.5 h ahead on the track, about 1 and 3 visible). It
+sits left of centre, only as far left as the clock needs to fit beside the pointer. Appointments are bands spanning
+their duration; tasks and reminders are wedges poking inward off the ruler. Beside it a
+digital clock, level with the pointer, and under that the date, a countdown, the next
+turn and whatever is running out, left-aligned against the strip.
 
 **`watchface-analog`** is a circular analog clock whose rim is a **six-hour timeline** —
 one hour behind, five ahead — with each entry at the clock angle of its own time, so a

@@ -80,7 +80,7 @@ different.
 | `PipeCompanionService` | Host, API 31+. Bound by the system while the paired watch is nearby. |
 | `PipeService` | Host, fallback. Foreground service, and the ongoing notification. |
 | `PipeHost` | `chooseHost`, plus the `CompanionDeviceManager` calls. |
-| `CalendarSource` | Queries `CalendarContract.Instances` over `[now − 2 h, now + 6 h]`. |
+| `CalendarSource` | Queries `CalendarContract.Instances` over `[now − 3 h, now + 6 h]`. |
 | `CalendarWatcher` | `ContentObserver` for local edits, `ACTION_PROVIDER_CHANGED` for syncs landing from the server. |
 | `PhoneBattery` | `ACTION_BATTERY_CHANGED`, filtered to whole-percent changes. |
 | `EventBlob` / `EventDiff` | Pure. The wire format and the scan diff. |
