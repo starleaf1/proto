@@ -229,6 +229,29 @@ int16_t chord_half(int16_t r, int16_t dy) {
 // Layout
 // ---------------------------------------------------------------------------
 
+// The widest line update_buffers() can print, weekday first and then the day of
+// the month against it: 7 + 31 measurements rather than 7 x 31, which is exact as
+// long as a weekday's width does not depend on the digits after it.
+static GSize widest_date(GFont font, GRect measure) {
+  static const char *const days[] = { "SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT" };
+  char buf[8];
+  GSize best = GSize(0, 0);
+  const char *wide = days[0];
+  for (int i = 0; i < 7; i++) {
+    snprintf(buf, sizeof buf, "%s 00", days[i]);
+    GSize s = graphics_text_layout_get_content_size(
+        buf, font, measure, GTextOverflowModeFill, GTextAlignmentCenter);
+    if (s.w > best.w) { best = s; wide = days[i]; }
+  }
+  for (int d = 1; d <= 31; d++) {
+    snprintf(buf, sizeof buf, "%s %02d", wide, d);
+    GSize s = graphics_text_layout_get_content_size(
+        buf, font, measure, GTextOverflowModeFill, GTextAlignmentCenter);
+    if (s.w > best.w) best = s;
+  }
+  return best;
+}
+
 Layout layout_compute(GRect bounds, GFont date_font, GFont slot_font) {
   Layout lo;
   lo.bounds = bounds;
@@ -319,14 +342,15 @@ Layout layout_compute(GRect bounds, GFont date_font, GFont slot_font) {
   if (lo.hub_r < 2) lo.hub_r = 2;
 
   // Representative strings, never the live ones: no row may change size as the
-  // day, the countdown or the distance moves. "MON 22" is the widest a date line
-  // gets and "+0:00" the widest a countdown gets — the sign is always drawn, so it
+  // day, the countdown or the distance moves. The date is the widest of the real
+  // ones, searched rather than named: "MON 22" was named, and in Gothic W is wider
+  // than M, so every Wednesday truncated to "WED ..." on emery. "+0:00" is the
+  // widest a countdown gets — the sign is always drawn, so it
   // is measured; one digit of hours, not two, is what fits it into a disc this size. "000 KM" is the widest a distance
   // gets: three digits is what fmt_distance() switches to above ten units, and
   // KM is wider than MI, so the fraction case is never the binding one.
   GRect measure = GRect(0, 0, bounds.size.w, bounds.size.h);
-  GSize ds = graphics_text_layout_get_content_size(
-      "MON 22", date_font, measure, GTextOverflowModeFill, GTextAlignmentCenter);
+  GSize ds = widest_date(date_font, measure);
   GSize cs = graphics_text_layout_get_content_size(
       "+0:00", slot_font, measure, GTextOverflowModeFill, GTextAlignmentCenter);
   GSize ns = graphics_text_layout_get_content_size(
@@ -425,6 +449,11 @@ Layout layout_compute(GRect bounds, GFont date_font, GFont slot_font) {
       int16_t b = (y + rows[i].h) < 0 ? -(y + rows[i].h) : (y + rows[i].h);
       int16_t far = a > b ? a : b;
       int16_t hw = chord_half(inner_r, far);
+      // Never narrower than the string the row was budgeted for. The solve above
+      // floors twice, so an odd-width row can come back a pixel short of its own
+      // text, and a short box does not clip — it ellipsises: emery's 69 px date got
+      // 68 and drew "WED ...". The pixel lands in a corner, which is blank.
+      if (2 * hw < rows[i].w) hw = (rows[i].w + 1) / 2;
       boxes[i] = GRect(lo.center.x - hw, lo.center.y + y, 2 * hw, rows[i].h);
       y += rows[i].h;
     }

@@ -40,6 +40,12 @@ void events_upsert(uint32_t id, time_t start, uint16_t dur_min, uint8_t kind);
 void events_remove(uint32_t id);
 void events_gc(time_t now);           // drop entries that can never show again
 
+// Whether the table holds the same entries as `before`, an earlier copy of
+// events_table(). By id rather than by slot: a flush refills the table in wire
+// order, so an unchanged set can land in different slots once events_gc() has
+// freed one, and that is not a change anyone can see.
+bool events_same_as(const Event *before);
+
 const Event *events_table(void);      // EVENTS_MAX entries; check .used
 
 // The table across a relaunch: written at exit, read back at launch.
