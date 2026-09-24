@@ -21,6 +21,13 @@ class MergePolicyTest {
         EventFacts(id or Int.MIN_VALUE, start, 0, EventKind.TASK)
 
     @Test
+    fun `a full table fits in one message`() {
+        // Every calendar send is a flush of the whole table, so this is what keeps each
+        // one to a single AppMessage and the multi-message MORE path untravelled.
+        assertTrue(MergePolicy.MAX_MERGED <= EventBlob.MAX_RECORDS)
+    }
+
+    @Test
     fun `both sources are present in the result`() {
         val out = MergePolicy.merge(listOf(cal(1, 100)), listOf(nur(1, 200)))
         assertEquals(2, out.size)

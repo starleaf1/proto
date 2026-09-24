@@ -80,23 +80,12 @@
 // is a vertical line there too — and only the right edge is a chord.
 #define ROW_ALIGN GTextAlignmentLeft
 
-// How far the countdown's sign leaves the line it qualifies: up for a '+', down
-// for a '-'. It is the only mark in the rows whose *position* is part of what it
-// says, and that is the point — at slot size, where a mark sits is resolved before
-// what shape it is, so the direction of the count arrives first and the glyph
-// confirms it. Costs no width and no colour, which is what makes it flint's cue as
-// much as emery's.
-//
-// Three sixteenths of the measured text height: that is the gap between where the font
-// sets a '+' and where it sets a cap. Measured again when the rows became Gothic — in a
-// 14 px GOTHIC_14_BOLD row the '+' drew two pixels below the digits' cap line and three
-// sixteenths of fourteen is two, so the fraction survived the font change intact, which
-// nothing else on this face's vertical arithmetic did.
-// So a '+' raised by it comes to rest on the cap line and a
-// '-' dropped by it on the baseline. Both stay inside the band the digits already
-// ink, so the row keeps its height and slot_knock_out() still covers the whole of
-// what draws.
-#define SIGN_RISE(h) ((h) * 3 / 16)
+// The margin of the running countdown's filled box on every side of the glyph and
+// the digits, as a fraction of the measured text height. The row's content is set in
+// by it on the leading side in both states, so the box's edge, not the glyph, is what
+// lines up with the date's column. Reaching back past that column instead put the
+// box hard against the hour label beside it on emery and gabbro.
+#define COUNT_PAD(h) ((h) / 6)
 
 // The face's fixed geometry, measured once per paint.
 //

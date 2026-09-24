@@ -88,20 +88,33 @@ dropped.
 
 ### Sync semantics
 
-- **On connect**, and whenever the companion cannot know what the watch holds, it
-  sends a **flush**: `CalFlags` has `FLUSH` set on the first message, and the watch
-  drops its whole table before applying the records. This is the only path that
-  corrects a watchface's own restored table — the watch keeps its entries across a
-  relaunch, but it cannot learn what changed while it was not running.
-- **Otherwise** the companion sends only the difference — upserts for entries that
-  are new or changed, removes for entries that have left the scan — with
-  `CalFlags = 0`.
+- **Every calendar message the companion sends is a flush**: `CalFlags` has `FLUSH`
+  set on the first message, and the watch drops its whole table before applying the
+  records. A flush is the only thing that corrects a watchface's own restored table —
+  the watch keeps its entries across a relaunch, but it cannot learn what changed while
+  it was not running.
+- **It sends one when the scan changed**, compared with the table it last sent, and
+  **regardless** on connect, on the periodic tick and on a manual re-sync. An unchanged
+  scan sends nothing.
+- **Why not deltas.** They were the rule until the watch's table outlived its app. A
+  delta sent while a face was off screen is NACKed, and one that lands later is applied
+  on top of a stale restored table, which keeps the earlier hole until the next tick. A
+  flush costs at most `6 + 24 × 12 = 294` payload bytes against a delta's few dozen, in
+  the same single message, so it costs almost nothing in radio time and repairs everything.
+- **One message per sync, by construction.** `MergePolicy.MAX_MERGED` caps the table
+  at the 24 records one message carries, and a unit test holds the two together, so
+  `MORE` and multi-message recovery are not reached in practice.
 - `MORE` is set on every message of a multi-message sync except the last.
 - An interrupted sync needs no recovery: the next `FLUSH` restarts it.
 - A flush carrying **zero** records is how the companion says the next six hours are
   clear. It must still be sent; sending nothing would leave the watch showing what it
   had.
-- Companion invariant: never interleave a delta into an in-flight flush.
+- **The watch still accepts deltas** — `CalFlags = 0`, upserts and removes applied to
+  the table it holds — and `tools/send-demo-events.py --remove` uses them. The companion
+  no longer sends them.
+- **The watch repaints only if the table changed.** Most flushes restate what it already
+  holds, so `wire.c` compares the table before and after, by id, and leaves the display
+  alone when nothing moved.
 
 **Removal is one op regardless of cause.** An entry that was deleted, an appointment
 that was cancelled and a task that was completed all leave the scan the same way — by
@@ -290,8 +303,8 @@ reserves for actual alarm-clock apps; `WorkManager`'s periodic minimum is fiftee
 minutes, which is slower than what this already has.
 
 **A tick whose flush does not land backs the next one off** — 600, 1200, 2400, then a
-3600 s cap — and the first send that gets through from any path resets it, including a
-delta off a calendar edit and the flush on reconnect. Nothing is queued and nothing is
+3600 s cap — and the first send that gets through from any path resets it, including the
+flush off a calendar edit and the flush on reconnect. Nothing is queued and nothing is
 resent: the next tick rescans the whole window regardless, so what backs off is how hard
 the companion tries, not a message it is holding on to. Backoff only ever lengthens the
 delay, so it cannot breach the budget above, and against a watch that is not listening it
@@ -308,9 +321,9 @@ when it does.
 scheduler of its own.** The companion already needs one periodic wake-up to re-scan the
 six-hour window, and a second alarm at the same period would not buy a second wake-up —
 it would queue behind the first for one budget and make both late, spending the
-three-period grace on self-inflicted contention. So there is exactly one alarm: it re-scans, sends the
-delta if there is one, and speaks a bare heartbeat only if there was not. Since any
-arrival is proof of life, a tick that sent a delta has already beaten.
+three-period grace on self-inflicted contention. So there is exactly one alarm: it
+re-scans, sends the flush, and speaks a bare heartbeat only if that could not go out.
+Since any arrival is proof of life, a tick that sent a flush has already beaten.
 
 A payload sent shortly *before* a tick also counts, so the beat is suppressed if
 anything went out in the last 60 s. That guard is deliberately far shorter than the
@@ -320,7 +333,7 @@ Doze-slipped tick between messages — two thirds of the grace spent to save one
 message.
 
 Note what this does **not** affect: latency. A real change is pushed the moment it
-happens; the `ContentObserver` fires, the scan runs and the delta goes out
+happens; the `ContentObserver` fires, the scan runs and the flush goes out
 synchronously. (The 250 ms debounce in `PebbleSender` applies to the nav and battery
 scalars, which arrive in bursts; calendar traffic does not go through it.)
 
@@ -364,31 +377,31 @@ it knows.
 
   The first is the heartbeat, which has nowhere else to live.
 
-  The second is that **the tick sends a full flush rather than a delta.** Switching
-  watchface does not drop the Bluetooth link, so nothing signals it, and every delta
-  sent while a face was not running went to a UUID that NACKed it. The face restores its
+  The second is that **the tick sends its flush even when the scan is unchanged.**
+  Switching watchface does not drop the Bluetooth link, so nothing signals it, and every
+  message sent while a face was not running went to a UUID that NACKed it. The face restores its
   own table on launch, so the swap is no longer a blank timeline — but that table is as
   of the last time that face was on screen, and nothing on the watch can reconcile it.
   With two faces installed, switching between them is the ordinary thing to do, so the
   periodic re-flush is what makes the swap self-healing — worst case one period of a
   stale marker rather than one period of an empty window. It costs `6 + 24 × 12 = 294`
   payload bytes against a bare heartbeat's four, once per period. The change-driven path
-  still sends a delta; this exception is the tick's alone.
+  sends only when the scan changed; sending regardless is the tick's alone.
 - **Put `Heartbeat` in every message**, which is what makes ordinary traffic a life sign
-  and lets the tick stay silent when it has just sent a delta.
+  and lets the tick stay silent when it has just sent a flush.
 - **Say nothing while Bluetooth is down.**
-- **Send absolute values**, never deltas, for everything except the calendar — and
-  there, a diff is only ever sent against a table the companion knows it flushed.
+- **Send absolute values**, never deltas — the calendar included, which goes as the
+  whole table every time.
 - **Flush on reconnect.** Every scalar resets when the watchface launches or the watch
   reboots — nav, the phone battery, the declared cadence. The calendar table is the one
   thing that survives a relaunch, and it survives as the watch's *own* memory of the
-  last thing it was told, which the companion has no way to read back; a diff against
-  it would be a diff against a phantom.
+  last thing it was told, which the companion has no way to read back; deciding not to
+  send by comparing against it would be comparing against a phantom.
 - **Clamp** before sending: percentages to `0`–`100`, distances to `>= 0`, durations
   to `0`–`65535`.
 - **Coalesce the scalars.** A burst of nav or battery updates collapses to one send
   after 250 ms. Calendar edits are not debounced — each change signal re-scans — but a
-  burst that nets out to no change sends nothing, because an empty diff is not
+  burst that nets out to no change sends nothing, because an unchanged scan is not
   transmitted.
 - **Bail on the first failed chunk** of a multi-message sync, and do not record it as
   sent. The remaining chunks belong to a sync the watch will never see the start of;

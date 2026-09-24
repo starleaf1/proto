@@ -75,8 +75,8 @@ class PebbleSender(private val context: Context) {
                     sentBattery = null
                     // Forget what the watch holds. It restores its own table across a
                     // relaunch and the protocol cannot read it back, so on reconnect the
-                    // only correct move is a full flush; pretending we still know its
-                    // table would send a diff against a phantom.
+                    // only correct move is a forced flush; gating that on a comparison
+                    // with the table we last sent would be comparing against a phantom.
                     sentEvents = emptyMap()
                 } else {
                     Log.i(TAG, "watch connected; re-syncing")
@@ -121,7 +121,7 @@ class PebbleSender(private val context: Context) {
      * Speak with nothing new to say, as proof of life.
      *
      * Called by the host's periodic tick when the re-scan it just did produced no
-     * calendar traffic — a tick that sent a delta has already proven we are alive, and
+     * calendar traffic — a tick that sent a flush has already proven we are alive, and
      * a second message would say the same thing twice.
      *
      * The guard covers the near miss: a real change sent seconds *before* the tick
@@ -143,32 +143,30 @@ class PebbleSender(private val context: Context) {
     }
 
     /**
-     * Reconciles the watch's event table with [events].
+     * Replaces the watch's event table with [events], if there is anything to say.
      *
-     * With [flush] the watch is told to drop everything first and the whole scan goes
-     * over — that is the reconnect path, and the only one that recovers from a
-     * watchface relaunch. Otherwise only the difference is sent.
+     * Every calendar message is a flush: the whole table, with `FLUSH` set. Without
+     * [force] it goes out only when [events] differs from what was last sent; with it,
+     * it goes out regardless — that is the reconnect path, the periodic tick and the
+     * manual re-sync, which all send because the watch's table cannot be read back and
+     * may have been restored stale across a relaunch.
      *
      * Returns whether anything actually reached the watch, so a caller driving the
      * periodic tick knows whether it still owes a [beat].
      */
-    fun syncCalendar(events: List<EventFacts>, flush: Boolean): Boolean {
+    fun syncCalendar(events: List<EventFacts>, force: Boolean): Boolean {
         if (!isWatchConnected()) {
             cancelFastBeat()
             return false
         }
-        val records = if (flush) {
-            events.map { EventBlob.Record(it, EventOp.UPSERT) }
-        } else {
-            EventDiff.diff(sentEvents, events)
-        }
-        if (records.isEmpty() && !flush) return false
+        if (!force && !EventDiff.changed(sentEvents, events)) return false
 
+        val records = events.map { EventBlob.Record(it, EventOp.UPSERT) }
         val chunks = EventBlob.chunk(records)
         val period = heartbeatPeriod()
         chunks.forEachIndexed { i, blob ->
             var flags = 0
-            if (flush && i == 0) flags = flags or Protocol.CAL_FLUSH
+            if (i == 0) flags = flags or Protocol.CAL_FLUSH
             if (i < chunks.lastIndex) flags = flags or Protocol.CAL_MORE
             val dict = PebbleDictionary().apply {
                 addBytes(Protocol.KEY_CAL_EVENTS, blob)
@@ -183,7 +181,7 @@ class PebbleSender(private val context: Context) {
         sentEvents = events.associateBy { it.id }
         Log.i(
             TAG,
-            "calendar ${if (flush) "flush" else "delta"}: " +
+            "calendar flush (${if (force) "forced" else "changed"}): " +
                 "${records.size} record(s) in ${chunks.size} message(s)",
         )
         scheduleFastBeat()

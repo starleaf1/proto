@@ -378,8 +378,11 @@ Layout layout_compute(GRect bounds, GFont num_font, GFont date_font,
   lo.track_px = lo.strip_h;
 
   // Representative strings, not the live ones: no row may shift as the day or the
-  // countdown changes. The countdown's own string carries its sign, because the sign is
-  // always there. "00:00" is also the widest the clock ever gets, and the clock
+  // countdown changes. "+00:00" is no longer anything the countdown draws: the sign
+  // gave way to a filled box, and the box's margin is narrower than the '+' was. It
+  // stays as the slot rows' stand-in width because gabbro's span_bot is solved from
+  // it, and a narrower one would lower the warnings row into a narrower chord for
+  // readings that were never measured against it. "00:00" is also the widest the clock ever gets, and the clock
   // is what the whole column's width is budgeted against — Orbitron is a wide face
   // and five glyphs of it is the binding constraint on this layout.
   GRect measure = GRect(0, 0, bounds.size.w, bounds.size.h);

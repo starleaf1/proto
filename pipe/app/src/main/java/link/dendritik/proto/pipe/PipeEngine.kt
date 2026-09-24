@@ -56,7 +56,7 @@ fun backoffDelayMs(baseMs: Long, misses: Int, capMs: Long): Long {
  *
  * Four change signals feed one action — re-scan and reconcile:
  *  - the calendar changed (an edit here, or a sync landing from the server)
- *  - the watch reconnected, which forces a full flush rather than a diff
+ *  - the watch reconnected, which sends even if the scan looks unchanged
  *  - time passed, so the six-hour window slid; nothing "changed" but the answer did
  *  - the user pressed re-sync, which is the only one of the four that is not a change
  *
@@ -72,7 +72,7 @@ class PipeEngine(private val context: Context) {
     private val sender = PebbleSender(context)
     private val calendar = CalendarSource(context)
     private val battery = PhoneBattery(context) { sender.submitBattery(it) }
-    private val watcher = CalendarWatcher(context) { reconcile(flush = false) }
+    private val watcher = CalendarWatcher(context) { reconcile(force = false) }
 
     // The second source. It contributes the same EventFacts as the calendar and
     // is merged into one table by MergePolicy, because the watch has one table
@@ -80,7 +80,7 @@ class PipeEngine(private val context: Context) {
     // entries on every flush.
     private val nuron = NuronSource(context)
     private val nuronHolder = NuronHolder()
-    private val nuronWatcher = NuronWatcher(context) { reconcile(flush = false) }
+    private val nuronWatcher = NuronWatcher(context) { reconcile(force = false) }
 
     private val alarms = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
     private var receiver: BroadcastReceiver? = null
@@ -92,7 +92,7 @@ class PipeEngine(private val context: Context) {
      * Consecutive flushes that did not reach the watch, and therefore the backoff
      * exponent for the next tick.
      *
-     * Cleared by any successful send from any path — a delta off a calendar edit and the
+     * Cleared by any successful send from any path — a flush off a calendar edit and the
      * flush on reconnect are both proof the link works, and neither of them is a tick.
      */
     private var misses = 0
@@ -102,16 +102,16 @@ class PipeEngine(private val context: Context) {
         started = true
         misses = 0          // a new session starts at the base period, not the old one's
 
-        sender.onWatchConnected = { reconcile(flush = true) }
+        sender.onWatchConnected = { reconcile(force = true) }
         sender.start()
         watcher.start()
         nuronWatcher.start()
         battery.start()
         startTick()
 
-        // A flush, not a diff: we have no idea what the watch is holding at this
-        // point, and a watchface that relaunched while we were dead has nothing.
-        reconcile(flush = true)
+        // Forced: we have no idea what the watch is holding at this point, and a
+        // watchface that relaunched while we were dead has nothing.
+        reconcile(force = true)
         PipeStatus.running = true
     }
 
@@ -133,8 +133,11 @@ class PipeEngine(private val context: Context) {
     // The one action
     // ---------------------------------------------------------------------------
 
-    /** Returns whether anything reached the watch. */
-    private fun reconcile(flush: Boolean): Boolean {
+    /**
+     * Returns whether anything reached the watch. Every send is a flush of the whole
+     * table; [force] sends it even when the scan matches what was last sent.
+     */
+    private fun reconcile(force: Boolean): Boolean {
         val now = System.currentTimeMillis()
         val calendarEvents = calendar.query(now)
         // The holder is what keeps a transient provider fault from wiping every
@@ -149,7 +152,7 @@ class PipeEngine(private val context: Context) {
         PipeStatus.nuronState = nuronHolder.state
         PipeStatus.calendarGranted = calendar.hasPermission()
         PipeStatus.watchConnected = sender.isWatchConnected()
-        val sent = sender.syncCalendar(events, flush)
+        val sent = sender.syncCalendar(events, force)
         if (sent) {
             PipeStatus.lastSyncAtMs = System.currentTimeMillis()
             noteSuccess()
@@ -158,16 +161,16 @@ class PipeEngine(private val context: Context) {
     }
 
     // The two writers of [misses], and the only ones. Deliberately asymmetric, because
-    // `syncCalendar` returns false for two unlike reasons: it could not send, or a delta
-    // came out empty. Only the first is a failure, and only a *flush* can tell them
-    // apart — a flush always has something to say, even with no records, so a false from
-    // one means the link. An empty delta is the ordinary case: Android's calendar
+    // `syncCalendar` returns false for two unlike reasons: it could not send, or the scan
+    // came out unchanged. Only the first is a failure, and only a *forced* sync can tell
+    // them apart — it always has something to say, even with no records, so a false from
+    // one means the link. An unchanged scan is the ordinary case: Android's calendar
     // provider fires its observer on all manner of internal churn, and counting those as
     // misses would back the tick off to an hour on a link that never faltered.
     //
-    // So: any success resets, wherever it came from, because a delta that landed and a
-    // reconnect flush that landed are both proof the link works. Only [flushNow] counts
-    // a miss.
+    // So: any success resets, wherever it came from, because an edit's flush that landed
+    // and a reconnect flush that landed are both proof the link works. Only [flushNow]
+    // counts a miss.
 
     /**
      * Something got through. Clear the backoff, and pull the alarm in if it had one.
@@ -200,13 +203,13 @@ class PipeEngine(private val context: Context) {
      * [noteMiss] for why a flush is the only send that can tell failure from silence.
      *
      * The beat covers the one case a flush cannot: with
-     * the watch connected `reconcile(flush = true)` always sends at least one message —
+     * the watch connected `reconcile(force = true)` always sends at least one message —
      * a zero-record flush is how "the next six hours are clear" is said — so `false`
      * here with a live link means the send threw, and the beat is the retry. With the
      * watch away [PebbleSender.beat] stands down on its own.
      */
     private fun flushNow(): Boolean {
-        val sent = reconcile(flush = true)
+        val sent = reconcile(force = true)
         if (!sent) {
             noteMiss()
             sender.beat()
@@ -227,16 +230,16 @@ class PipeEngine(private val context: Context) {
      * budget and made each other late — a heartbeat that could not keep the cadence it
      * declared.
      *
-     * **The tick flushes rather than diffing, and that is the one place this companion
-     * speaks on a timer with nothing new to say.** Changing watchface does not drop the
-     * Bluetooth link, so nothing signals it; every delta sent while a face was off
-     * screen went to a UUID that NACKed it. The face restores its own table when it
+     * **The tick sends whether or not the scan changed, and that is the one place this
+     * companion speaks on a timer with nothing new to say.** Changing watchface does not
+     * drop the Bluetooth link, so nothing signals it; every message sent while a face was
+     * off screen went to a UUID that NACKed it. The face restores its own table when it
      * relaunches, so the swap is no longer a blank timeline — but that table is as of
      * the last time that face was on screen. Since there are two faces and switching
      * between them is the ordinary thing to do with them, the periodic re-flush is what
      * makes the swap self-healing. It costs 324 bytes against 15 bytes
-     * once a period. The change-driven path in [reconcile] still sends a delta — this
-     * exception is the tick's alone. See `docs/protocol.md`.
+     * once a period. The change-driven path in [reconcile] sends only when the scan
+     * changed — sending regardless is the tick's alone. See `docs/protocol.md`.
      *
      * **A tick whose flush did not land backs the next one off**, doubling from the base
      * 600 s to a 3600 s cap — see [tickDelayMs]. It is not a retry of the *message*:

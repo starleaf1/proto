@@ -79,26 +79,20 @@ object EventBlob {
 }
 
 /**
- * Turns two successive calendar scans into the smallest set of records that brings
- * the watch's table in line with ours.
+ * Whether a scan says anything the watch has not already been told.
  *
- * Removal is one op regardless of cause. An entry that was deleted, an appointment
- * that was cancelled and a task that was completed all leave the scan the same way
- * — by no longer being in it — and the watch renders no reason, so the wire carries
- * none.
+ * It decides *whether* to send, never *what*: every calendar message carries the whole
+ * table as a flush, so there is no record-level difference to compute. A flush costs a
+ * few hundred bytes against a delta's few dozen and the same one message, and in return
+ * a face that was off screen when an earlier message went out — and so NACKed it — is
+ * put right by the next one rather than left holding a table with a hole in it. See
+ * `docs/protocol.md`.
+ *
+ * The gate is still what keeps the radio quiet. Android's calendar provider fires its
+ * observer on all manner of internal churn that changes no entry, and a scan that comes
+ * out identical sends nothing at all.
  */
 object EventDiff {
-    fun diff(previous: Map<Int, EventFacts>, current: List<EventFacts>): List<EventBlob.Record> {
-        val out = mutableListOf<EventBlob.Record>()
-        val seen = HashSet<Int>(current.size)
-
-        for (e in current) {
-            seen += e.id
-            if (previous[e.id] != e) out += EventBlob.Record(e, EventOp.UPSERT)
-        }
-        for ((id, old) in previous) {
-            if (id !in seen) out += EventBlob.Record(old, EventOp.REMOVE)
-        }
-        return out
-    }
+    fun changed(previous: Map<Int, EventFacts>, current: List<EventFacts>): Boolean =
+        current.associateBy { it.id } != previous
 }

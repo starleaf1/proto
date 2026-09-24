@@ -2,18 +2,17 @@ package link.dendritik.proto.pipe.pebble
 
 import link.dendritik.proto.pipe.calendar.EventFacts
 import link.dendritik.proto.pipe.protocol.EventKind
-import link.dendritik.proto.pipe.protocol.EventOp
-import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * What two successive calendar scans should send.
+ * Whether two successive calendar scans are worth a message.
  *
- * The interesting cases are all absences: an entry deleted, an appointment cancelled
- * and a task completed are indistinguishable from here, because all three simply
- * stop appearing in the scan. That is the whole reason the wire carries one removal
- * op rather than a reason.
+ * Every message carries the whole table, so this only decides whether to send. The
+ * case that matters most is the first one: an unchanged scan must send nothing, because
+ * the calendar provider fires its observer on churn that changes no entry, and each of
+ * those would otherwise wake the radio.
  */
 class EventDiffTest {
 
@@ -24,48 +23,39 @@ class EventDiffTest {
 
     @Test
     fun `nothing changed sends nothing`() {
-        val a = ev(1)
-        assertTrue(EventDiff.diff(previous(a), listOf(a)).isEmpty())
+        assertFalse(EventDiff.changed(previous(ev(1), ev(2)), listOf(ev(1), ev(2))))
     }
 
     @Test
-    fun `a new entry is an upsert`() {
-        val records = EventDiff.diff(previous(ev(1)), listOf(ev(1), ev(2)))
-        assertEquals(1, records.size)
-        assertEquals(EventOp.UPSERT, records[0].op)
-        assertEquals(2, records[0].event.id)
+    fun `scan order is not a change`() {
+        assertFalse(EventDiff.changed(previous(ev(1), ev(2)), listOf(ev(2), ev(1))))
     }
 
     @Test
-    fun `a moved entry is an upsert, not a remove and an add`() {
+    fun `an empty window after an empty window is not a change`() {
+        assertFalse(EventDiff.changed(emptyMap(), emptyList()))
+    }
+
+    @Test
+    fun `a new entry is a change`() {
+        assertTrue(EventDiff.changed(previous(ev(1)), listOf(ev(1), ev(2))))
+    }
+
+    @Test
+    fun `an edited entry is a change`() {
         // The id is derived from the start time rounded to the minute, so a genuine
-        // reschedule usually re-keys. Editing the duration does not, and that path has
-        // to reach the watch as an update to the same marker.
-        val records = EventDiff.diff(previous(ev(1, dur = 30)), listOf(ev(1, dur = 90)))
-        assertEquals(1, records.size)
-        assertEquals(EventOp.UPSERT, records[0].op)
-        assertEquals(90, records[0].event.durationMin)
+        // reschedule usually re-keys. Editing the duration does not, and that has to
+        // reach the watch too.
+        assertTrue(EventDiff.changed(previous(ev(1, dur = 30)), listOf(ev(1, dur = 90))))
     }
 
     @Test
-    fun `a vanished entry is a remove`() {
-        val records = EventDiff.diff(previous(ev(1), ev(2)), listOf(ev(2)))
-        assertEquals(1, records.size)
-        assertEquals(EventOp.REMOVE, records[0].op)
-        assertEquals(1, records[0].event.id)
+    fun `a vanished entry is a change`() {
+        assertTrue(EventDiff.changed(previous(ev(1), ev(2)), listOf(ev(2))))
     }
 
     @Test
-    fun `an emptied window removes everything it held`() {
-        val records = EventDiff.diff(previous(ev(1), ev(2), ev(3)), emptyList())
-        assertEquals(3, records.size)
-        assertTrue(records.all { it.op == EventOp.REMOVE })
-    }
-
-    @Test
-    fun `a first scan against nothing is all upserts`() {
-        val records = EventDiff.diff(emptyMap(), listOf(ev(1), ev(2, dur = 0)))
-        assertEquals(2, records.size)
-        assertTrue(records.all { it.op == EventOp.UPSERT })
+    fun `an emptied window is a change`() {
+        assertTrue(EventDiff.changed(previous(ev(1), ev(2)), emptyList()))
     }
 }

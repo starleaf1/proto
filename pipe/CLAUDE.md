@@ -108,12 +108,12 @@ unpacker could share the same mistake as the packer and both would agree.
   thing the minimum exists to prevent.
 - **A failed tick backs the next one off; a failed anything-else does not, and the
   asymmetry is the whole point.** 600, 1200, 2400, then a 3600 s cap, reset by the first
-  send that lands from any path — including a delta off a calendar edit and the reconnect
-  flush, because either one is proof the link works and neither is a tick. But only a
-  *flush* may count a miss, because `syncCalendar` returns `false` for two unlike
-  reasons: it could not send, or the delta came out empty. A flush always has something
-  to say even with no records, so a `false` from one means the link; an empty delta is
-  the ordinary case, since Android's calendar provider fires its observer on all manner
+  send that lands from any path — including the flush off a calendar edit and the
+  reconnect flush, because either one is proof the link works and neither is a tick. But
+  only a *forced* sync may count a miss, because `syncCalendar` returns `false` for two
+  unlike reasons: it could not send, or the scan came out unchanged. A forced sync always
+  has something to say even with no records, so a `false` from one means the link; an
+  unchanged scan is the ordinary case, since Android's calendar provider fires its observer on all manner
   of internal churn, and counting those would back the tick off to an hour on a link that
   never faltered. Nothing is queued and nothing is resent: the next tick
   rescans the whole window anyway, so what backs off is how hard we try, not a message we

@@ -150,6 +150,31 @@ void events_upsert(uint32_t id, time_t start, uint16_t dur_min, uint8_t kind) {
   };
 }
 
+static const Event *find_in(const Event *table, uint32_t id) {
+  for (int i = 0; i < EVENTS_MAX; i++) {
+    if (table[i].used && table[i].id == id) return &table[i];
+  }
+  return NULL;
+}
+
+bool events_same_as(const Event *before) {
+  int n_before = 0, n_now = 0;
+  for (int i = 0; i < EVENTS_MAX; i++) {
+    if (before[i].used) n_before++;
+    if (!s_events[i].used) continue;
+    n_now++;
+    // Field by field, not memcmp: struct padding is not guaranteed to agree.
+    const Event *e = &s_events[i];
+    const Event *o = find_in(before, e->id);
+    if (!o || o->start != e->start || o->dur_min != e->dur_min || o->kind != e->kind) {
+      return false;
+    }
+  }
+  // Ids are unique within a table, so equal counts with every current entry
+  // found means nothing was dropped either.
+  return n_before == n_now;
+}
+
 void events_remove(uint32_t id) {
   for (int i = 0; i < EVENTS_MAX; i++) {
     if (s_events[i].used && s_events[i].id == id) {
@@ -203,11 +228,14 @@ SlotPick events_pick_slot(time_t now) {
 
   p.valid = true;
   p.kind = pick->kind;
+  // Both cases count down to the next change: the start of what is coming, or the
+  // end of what is running. Time already spent inside a meeting is not something
+  // anyone acts on; time until it lets them go is.
   if (pick == running) {
-    p.counting_up = true;
-    p.seconds = (int32_t)(now - pick->start);
+    p.running = true;
+    p.seconds = (int32_t)(event_end(pick) - now);
   } else {
-    p.counting_up = false;
+    p.running = false;
     p.seconds = (int32_t)(pick->start - now);
   }
   return p;

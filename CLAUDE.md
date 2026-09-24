@@ -117,9 +117,11 @@ Shared by both faces:
   goes to persistent storage at exit for that reason: the firmware kills a watchface
   every time the user glances at another app, and the companion's re-flush can be a
   ten minutes away.
-- **The companion sends a full flush on every periodic tick, not a delta.** Switching
-  watchface does not drop the Bluetooth link, so nothing signals it, and every delta
-  sent while a face was off screen went to a UUID that NACKed it. The face restores its
+- **The companion sends a full flush on every periodic tick, even with nothing new.**
+  Every calendar message is the whole table, never a delta; outside the tick one goes out
+  only when the scan changed. Switching watchface does not drop the Bluetooth link, so
+  nothing signals it, and every message sent while a face was off screen went to a UUID
+  that NACKed it. The face restores its
   own table at launch, so what it comes up with is correct as of the last time it was
   running and no more; with two faces the swap is the ordinary thing to do, so the tick
   re-flushes to make it self-healing. It is the one place the companion speaks on a

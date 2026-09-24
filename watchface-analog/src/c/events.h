@@ -71,9 +71,8 @@ bool event_prominent(const Event *e, time_t now);
 typedef struct {
   bool    valid;
   uint8_t kind;
-  bool    counting_up;   // an appointment under way, counting since it began
-  int32_t seconds;       // magnitude of the countdown or count-up; the sign the
-                         // slot prints comes from counting_up, not from this
+  bool    running;       // an appointment under way, counting down to its end
+  int32_t seconds;       // until the pick starts, or until it ends if running
 } SlotPick;
 
 SlotPick events_pick_slot(time_t now);

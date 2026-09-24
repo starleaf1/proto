@@ -228,11 +228,14 @@ SlotPick events_pick_slot(time_t now) {
 
   p.valid = true;
   p.kind = pick->kind;
+  // Both cases count down to the next change: the start of what is coming, or the
+  // end of what is running. Time already spent inside a meeting is not something
+  // anyone acts on; time until it lets them go is.
   if (pick == running) {
-    p.counting_up = true;
-    p.seconds = (int32_t)(now - pick->start);
+    p.running = true;
+    p.seconds = (int32_t)(event_end(pick) - now);
   } else {
-    p.counting_up = false;
+    p.running = false;
     p.seconds = (int32_t)(pick->start - now);
   }
   return p;

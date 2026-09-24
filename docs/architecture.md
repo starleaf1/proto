@@ -349,10 +349,11 @@ single `setAndAllowWhileIdle` alarm because Doze throttles that call per app rat
 per alarm — a second one at the same period would only make the first late. Its 600 s is
 the platform's number rather than a preference: Doze allows a while-idle alarm no more
 than once per nine minutes per app, so six an hour is the budget with one to spare. So
-the tick re-scans the slid window and sends a **flush**, not a delta — the one place this
-companion speaks on a timer with nothing new to say. Switching watchface does not drop
-the Bluetooth link, so nothing signals it, and every delta sent while a face was off
-screen went to a UUID that NACKed it — the face restores its own table at launch, but
+the tick re-scans the slid window and sends its **flush** even when nothing changed — the
+one place this companion speaks on a timer with nothing new to say. (Every calendar
+message is a flush; outside the tick one goes out only when the scan changed.) Switching
+watchface does not drop the Bluetooth link, so nothing signals it, and every message sent
+while a face was off screen went to a UUID that NACKed it — the face restores its own table at launch, but
 only as of the last time it was running; with two faces installed the swap is the
 ordinary thing to do, and the re-flush is what makes it self-healing. A bare heartbeat is
 what is left for when the send fails outright, and a tick whose flush did not land doubles

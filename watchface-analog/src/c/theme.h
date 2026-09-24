@@ -18,16 +18,6 @@
 #define COL_BG          GColorWhite
 #define COL_INK         GColorBlack
 
-// The count-up: its sign and its digits, while it is counting up.
-//
-// Cobalt and not the cerulean the bands use. These are *digits*, and the rule
-// the palette follows is that an ink drawing text needs 4.5:1 against the
-// background while an ink drawing a large solid shape can live near 2.5:1 —
-// cerulean measures 2.6:1 and cobalt 5.0:1. An accent identical to COL_BAND
-// also says nothing: the one place they meet is a running appointment, where
-// the band and the count-up describing it would be the same colour.
-#define COL_ACCENT      PBL_IF_COLOR_ELSE(GColorCobaltBlue, GColorBlack)
-
 // Appointment bands — one hue for both states.
 //
 // Prominence is carried by depth, which works identically on all three
@@ -35,6 +25,12 @@
 // half. A second, paler tint would be redundant where there is colour and
 // absent where there is not.
 #define COL_BAND        PBL_IF_COLOR_ELSE(GColorVividCerulean, GColorBlack)
+
+// The countdown wears the band too, since it is the band's own reading: cerulean
+// digits on white before an appointment starts, white on a cerulean box while it
+// runs. Below the 4.5:1 this palette asks of text elsewhere — white on cerulean
+// measures 2.6:1 — and chosen on sight rather than by that rule. On flint the band
+// is black and this is plain ink and its inversion.
 
 // "Now" — which on this face is the hour hand, and nothing else.
 //
@@ -101,8 +97,12 @@
 //
 // A system font's number is its pixel size, and the content height comes back equal to
 // it exactly — which the TTF resources' em numbers never did.
-// One size for both rows here, where the other two displays keep the date a rung
-// above the slot. flint is the display where the disc's radius is dearest per row:
+// One size for both rows, on all three displays. emery and gabbro kept the date a
+// rung above the slot at 28 px, and it read as the loudest thing on the dial for the
+// one row that never changes; at 24 the disc came out 42 px on emery rather than 44.
+// gabbro's stayed at 57, because its disc is sized by the notification row, not the
+// date. flint came to it first and for a harder reason. It is the display where the
+// disc's radius is dearest per row:
 // it is solved from these two rows, it is drawn over the hands, and the hour hand is
 // 60 px long to begin with. Measured, a 24 px date puts the disc at 37 and leaves 23
 // px of hour hand outside it — a stub — where 18 px puts it at 34 and leaves 26. The
@@ -113,12 +113,12 @@
 #  define FONT_DATE  FONT_KEY_GOTHIC_18_BOLD
 #  define FONT_SLOT  FONT_KEY_GOTHIC_18_BOLD
 #elif defined(PBL_PLATFORM_EMERY)
-#  define FONT_DATE  FONT_KEY_GOTHIC_28_BOLD
+#  define FONT_DATE  FONT_KEY_GOTHIC_24_BOLD
 #  define FONT_SLOT  FONT_KEY_GOTHIC_24_BOLD
 #else   // gabbro
 // The same pair as emery, where the TTF table had this display a size below it. That
 // gap was the condensed face's: DATE_26 was what fit the chord the date sits on here,
 // and GOTHIC_28_BOLD measures narrower than DATE_26 did.
-#  define FONT_DATE  FONT_KEY_GOTHIC_28_BOLD
+#  define FONT_DATE  FONT_KEY_GOTHIC_24_BOLD
 #  define FONT_SLOT  FONT_KEY_GOTHIC_24_BOLD
 #endif

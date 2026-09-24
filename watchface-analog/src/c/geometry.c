@@ -344,15 +344,15 @@ Layout layout_compute(GRect bounds, GFont date_font, GFont slot_font) {
   // Representative strings, never the live ones: no row may change size as the
   // day, the countdown or the distance moves. The date is the widest of the real
   // ones, searched rather than named: "MON 22" was named, and in Gothic W is wider
-  // than M, so every Wednesday truncated to "WED ..." on emery. "+0:00" is the
-  // widest a countdown gets — the sign is always drawn, so it
-  // is measured; one digit of hours, not two, is what fits it into a disc this size. "000 KM" is the widest a distance
+  // than M, so every Wednesday truncated to "WED ..." on emery. "0:00" is the
+  // widest a countdown gets; one digit of hours, not two, is what fits it into a
+  // disc this size. "000 KM" is the widest a distance
   // gets: three digits is what fmt_distance() switches to above ten units, and
   // KM is wider than MI, so the fraction case is never the binding one.
   GRect measure = GRect(0, 0, bounds.size.w, bounds.size.h);
   GSize ds = widest_date(date_font, measure);
   GSize cs = graphics_text_layout_get_content_size(
-      "+0:00", slot_font, measure, GTextOverflowModeFill, GTextAlignmentCenter);
+      "0:00", slot_font, measure, GTextOverflowModeFill, GTextAlignmentCenter);
   GSize ns = graphics_text_layout_get_content_size(
       "000 KM", slot_font, measure, GTextOverflowModeFill, GTextAlignmentCenter);
   GSize ws = graphics_text_layout_get_content_size(
@@ -364,20 +364,21 @@ Layout layout_compute(GRect bounds, GFont date_font, GFont slot_font) {
   // under the digits for a progress bar — unconditionally, because the bar only
   // drew while an appointment was running and a disc that changed size when it did
   // would move every row in it at the one moment the reader is watching one. The
-  // sign in front of the digits says the same thing on the line itself, so the
-  // reservation is gone and the disc is a bar's height smaller on every platform.
+  // row inverting says the same thing on the line itself, so the reservation is
+  // gone and the disc is a bar's height smaller on every platform.
   int16_t count_h = ROW_H(cs.h);
 
   // What each row needs in the one-row [glyph] number form slot_layout() draws.
-  // The glyph is 85% of its row, and the gap after it is SLOT_GAP — half as much on
-  // the countdown, whose number starts with a sign. 85% is slot_layout()'s own
-  // number, repeated here because the disc has to be sized before there is
-  // anything to lay out in it; the gap is shared through geometry.h.
+  // The glyph is 85% of its row, and the gap after it is SLOT_GAP. 85% is
+  // slot_layout()'s own number, repeated here because the disc has to be sized
+  // before there is anything to lay out in it; the gap is shared through
+  // geometry.h. The countdown also carries its filled box's margin on both sides,
+  // reserved whether the box draws or not.
   int16_t cg = cs.h * 85 / 100;
   int16_t bg = row_h * 85 / 100;
-  int16_t count_w = cg + SLOT_GAP(cg, COUNT_GAP_DIV) + cs.w;
-  int16_t nav_w = bg + SLOT_GAP(bg, SLOT_GAP_DIV) + ns.w;
-  int16_t warn_w = bg + SLOT_GAP(bg, SLOT_GAP_DIV) + ws.w;
+  int16_t count_w = COUNT_PAD(cs.h) + cg + SLOT_GAP(cg) + cs.w + COUNT_PAD(cs.h);
+  int16_t nav_w = bg + SLOT_GAP(bg) + ns.w;
+  int16_t warn_w = bg + SLOT_GAP(bg) + ws.w;
 
   // The rows of the disc, top to bottom, each with the gap that precedes it.
   //

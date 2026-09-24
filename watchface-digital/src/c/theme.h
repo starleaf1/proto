@@ -19,7 +19,7 @@
 #define COL_BG          GColorWhite
 #define COL_INK         GColorBlack
 
-// The clock, and the count-up — its sign and its digits while it is running.
+// The clock.
 #define COL_ACCENT      PBL_IF_COLOR_ELSE(GColorVividCerulean, GColorBlack)
 
 // Appointment bands — one hue for both states.
@@ -34,6 +34,12 @@
 // Nor does position, which the strip added for free: a band that has started is
 // necessarily crossing or above the pointer.
 #define COL_BAND        PBL_IF_COLOR_ELSE(GColorVividCerulean, GColorBlack)
+
+// The countdown wears the band too, since it is the band's own reading: cerulean
+// digits on white before an appointment starts, white on a cerulean box while it
+// runs. Below the 4.5:1 this palette asks of text elsewhere — white on cerulean
+// measures 2.6:1 — and chosen on sight rather than by that rule. On flint the band
+// is black and this is plain ink and its inversion.
 
 // "Now". Red where there is colour, and black on flint because that is all there is.
 //

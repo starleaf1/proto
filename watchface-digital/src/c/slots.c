@@ -16,14 +16,13 @@
 // a battery, not as anything to do with a calendar. It is Material Design's
 // calendar mark now. The echo of the strip was worth less than being recognised.
 //
-// Which direction the count is running is carried by a sign in front of the
-// digits — '+' inside something, '-' before it. That reading used to live inside
-// the glyph, as a fill, and then under the digits as a progress bar; a sign is
-// the first form of it that states the direction in both cases rather than
-// leaving one of them to be inferred from an absence, and the only one that needs
-// no space of its own beyond the line it is on. The '+' rides on the digits' cap
-// line and the '-' on their baseline, so the sign says it twice — once by shape
-// and once by height — inside the slack the line already carries.
+// Whether the count is running out an appointment or running down to the next
+// thing is carried by the row inverting: a filled box behind the glyph and the
+// digits while something is under way, plain ink before anything starts. That
+// reading has been a fill inside the glyph, a progress bar under the digits and a
+// sign in front of them; the box is the first form that needs neither colour nor
+// a glyph of its own, and it is the strip's own grammar at row size — a running
+// band is the deeper one, and a running count is the filled one.
 //
 // Every glyph is drawn from primitives or a normalised point table rather than a
 // bitmap. Three platforms means three sizes, and vectors stay crisp at all of
@@ -351,67 +350,52 @@ void slots_draw_count(GContext *ctx, const Layout *lo, GFont font, time_t now) {
 
   int32_t mins = p.seconds / 60;
   if (mins > 99 * 60 + 59) mins = 99 * 60 + 59;
-  char digits[12];
+  char digits[12];   // sized past the clamp to keep snprintf quiet
   snprintf(digits, sizeof digits, "%02d:%02d", (int)(mins / 60), (int)(mins % 60));
-
-  // The sign is the whole of the direction cue: '+' for time already spent inside
-  // something running, '-' for time still to go before something starts. It replaced
-  // a progress bar under the digits, which needed a row of its own reserved whether
-  // or not it drew and still could not say which way the number was moving without
-  // being present — an absent bar is not a readable state. A sign is one glyph on the
-  // line it qualifies, it is the same shape on all three displays, and it reads with
-  // no colour at all, which is what flint has.
-  //
-  // The two signs also sit at two heights — the '+' up on the digits' cap line, the
-  // '-' down on their baseline — so the cue is a position as well as a shape. See
-  // SIGN_RISE.
-  //
-  // Laid out as though the sign were always '+', which is the wider of the two and
-  // what layout_compute() measures the row against; the sign that actually draws goes
-  // left-aligned into that width. So the digits keep their column and no part of the
-  // row moves at the minute the count turns over.
-  char sized[16];   // the sign, then HH:MM; sized past the clamp to keep snprintf quiet
-  snprintf(sized, sizeof sized, "+%s", digits);
 
   // COL_WARN, not COL_TASK_SOON. The strip's marker for this same entry is amber and
   // stays amber — it is a solid triangle and carries 1.9:1 fine — but these are digits,
   // and digits at slot size need the darker end of the same warm family. See theme.h.
-  GColor ink = COL_INK;
-  if (p.counting_up) ink = COL_ACCENT;
-  else if (p.kind == EV_TASK) ink = COL_WARN;
+  GColor ink = (p.kind == EV_TASK && !p.running) ? COL_WARN : COL_BAND;
 
   GRect gbox, tbox;
-  slot_layout(lo->count_box, font, sized, &gbox, &tbox);
-  slot_knock_out(ctx, gbox, tbox);
+  slot_layout(lo->count_box, font, digits, &gbox, &tbox);
 
-  if (p.kind == EV_TASK && !p.counting_up) glyph_task(ctx, gbox, ink);
+  // The glyph is centred on the digits' ink rather than on the row. Gothic sets its
+  // baseline on the text box's last row and digits stand five eighths of the text
+  // height above it, so the ink sits low in a row that carries four pixels of pad —
+  // two and a half below the row's centre at 24 px. The box has to clear both the
+  // glyph and the digits evenly, which it cannot do while they are centred apart.
+  // Applied in both states, so nothing moves when the box appears.
+  GSize ts = graphics_text_layout_get_content_size(digits, font, lo->count_box,
+                                                   GTextOverflowModeFill,
+                                                   GTextAlignmentLeft);
+  int16_t pad = COUNT_PAD(ts.h);
+  gbox.origin.x += pad;
+  tbox.origin.x += pad;
+  int16_t ink_bot = tbox.origin.y + ts.h;
+  int16_t ink_mid = (ink_bot - ts.h * 5 / 8 + ink_bot) / 2;
+  gbox.origin.y = ink_mid - gbox.size.h / 2;
+
+  if (p.running) {
+    // Sized off the glyph, which is the taller of the two here — most of a row that
+    // carries pad — with COUNT_PAD on every side. It replaces the knock-out: it covers
+    // more than the knock-out did, and in COL_BAND rather than COL_BG.
+    int16_t x0 = gbox.origin.x - pad;
+    int16_t x1 = tbox.origin.x + ts.w + pad;
+    GRect fill = GRect(x0, gbox.origin.y - pad, x1 - x0, gbox.size.h + 2 * pad);
+    graphics_context_set_fill_color(ctx, COL_BAND);
+    graphics_fill_rect(ctx, fill, pad, GCornersAll);
+    ink = COL_BG;
+  } else {
+    slot_knock_out(ctx, gbox, tbox);
+  }
+
+  if (p.kind == EV_TASK && !p.running) glyph_task(ctx, gbox, ink);
   else glyph_calendar(ctx, gbox, ink);
 
-  // What the sign is worth in width, taken as the difference it makes to the string
-  // rather than measured on its own: a glyph measured alone carries both its side
-  // bearings, and the two draws have to add up to exactly the width the row was laid
-  // out for.
-  GSize full = graphics_text_layout_get_content_size(sized, font, lo->count_box,
-                                                     GTextOverflowModeFill,
-                                                     GTextAlignmentLeft);
-  GSize bare = graphics_text_layout_get_content_size(digits, font, lo->count_box,
-                                                     GTextOverflowModeFill,
-                                                     GTextAlignmentLeft);
-  int16_t sign_w = full.w - bare.w;
-  if (sign_w < 1) sign_w = 1;
-
-  // Two draws, because the pair sits at two heights. The digits land where they
-  // always did — the sign's width is reserved in front of them either way.
-  const char sign[2] = { p.counting_up ? '+' : '-', '\0' };
-  GRect sbox = tbox;
-  sbox.origin.y += p.counting_up ? -SIGN_RISE(full.h) : SIGN_RISE(full.h);
-  GRect dbox = tbox;
-  dbox.origin.x += sign_w;
-
   graphics_context_set_text_color(ctx, ink);
-  graphics_draw_text(ctx, sign, font, sbox, GTextOverflowModeFill,
-                     GTextAlignmentLeft, NULL);
-  graphics_draw_text(ctx, digits, font, dbox, GTextOverflowModeFill,
+  graphics_draw_text(ctx, digits, font, tbox, GTextOverflowModeFill,
                      GTextAlignmentLeft, NULL);
 }
 

@@ -135,16 +135,23 @@ static bool handle_calendar(DictionaryIterator *iter) {
   Tuple *b = dict_find(iter, MESSAGE_KEY_CalEvents);
   if (!f && !b) return false;
 
+  // Every calendar message carries the whole table — the companion flushes on
+  // any change and again on every periodic tick — so most of them restate what we
+  // already hold. Keep a copy and repaint only if the table actually moved. Static
+  // rather than on the stack: it is EVENTS_MAX rows and the app stack is small.
+  static Event s_before[EVENTS_MAX];
+  memcpy(s_before, events_table(), sizeof s_before);
+
   int32_t flags = f ? f->value->int32 : 0;
   // Clear before the payload check, not after: a flush carrying no records is
   // how the companion says the next six hours are empty.
   if (flags & CAL_FLUSH) events_clear();
 
   if (!b || b->type != TUPLE_BYTE_ARRAY || b->length < CAL_HEADER) {
-    return (flags & CAL_FLUSH) != 0;
+    return !events_same_as(s_before);
   }
   const uint8_t *p = b->value->data;
-  if (p[0] != CAL_VERSION) return (flags & CAL_FLUSH) != 0;
+  if (p[0] != CAL_VERSION) return !events_same_as(s_before);
 
   // Trust the tuple's length over the header's count — a mismatch means a
   // truncated or malformed message, and reading past the buffer is worse than
@@ -167,7 +174,7 @@ static bool handle_calendar(DictionaryIterator *iter) {
       events_upsert(id, (time_t)start, dur, kind > EV_TASK ? EV_APPOINTMENT : kind);
     }
   }
-  return true;
+  return !events_same_as(s_before);
 }
 
 static bool handle_nav(DictionaryIterator *iter) {

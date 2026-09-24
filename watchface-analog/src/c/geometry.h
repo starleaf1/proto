@@ -40,25 +40,11 @@
 // side. slot_layout() draws it and layout_compute() budgets the plate against it,
 // so it lives here rather than in either.
 //
-// The countdown gets half of what the other rows get, and that is a width
-// argument, not a spacing one. Its number begins with a '+' or a '-' now, which
-// is a glyph of width the row did not carry before — and a glyph of width in a
-// row of the disc costs the plate more radius than the progress bar the sign
-// replaced ever cost it in height. Halving this gap pays most of it back: at the time,
-// the plate came out at 32/44/61 px on flint/emery/gabbro against 33/44/64 with the
-// bar, so two of the three gave radius back and none of them asked for more. It is
-// 34/44/58 now — the fonts changed, and the round display's two notification rows
-// became one.
-//
-// Half and not all of it: at no gap the row still read, but a *task* countdown
-// put the blunt wedge hard against the minus sign, and a solid triangle followed
-// by a horizontal bar is the one shape this face must not make by accident — it
-// is a maneuver arrow, which is what the row below this one draws. Clearance
-// between a glyph and a number is cheap; a countdown that reads as a turn
-// instruction is not.
+// The countdown used to get half of this, to pay for the '+' or '-' its number
+// began with. The sign is gone, and with it the one hazard a narrow gap raised: a
+// task wedge hard against a minus is a maneuver arrow.
 #define SLOT_GAP_DIV  3
-#define COUNT_GAP_DIV 6
-#define SLOT_GAP(side, div) ((side) / (div))
+#define SLOT_GAP(side) ((side) / SLOT_GAP_DIV)
 
 // A text row's box is taller than the ink in it. Pebble font resources carry their own
 // ascent, and an uppercase-and-digits subset never descends below the baseline, so a
@@ -85,23 +71,11 @@
 #define ROW_H(h)    ((h) * 7 / 8)
 #define ROW_LIFT(h) ((h) / 4)
 
-// How far the countdown's sign leaves the line it qualifies: up for a '+', down
-// for a '-'. It is the only mark on this face whose *position* is part of what it
-// says, and that is the point — at slot size, where a mark sits is resolved before
-// what shape it is, so the direction of the count arrives first and the glyph
-// confirms it. Costs no width and no colour, which is what makes it flint's cue as
-// much as gabbro's.
-//
-// Three sixteenths of the measured text height. It used to be the same fraction as
-// ROW_LIFT and is no longer, which is worth saying plainly: the two measure different
-// slacks and only happened to agree under the TTF resources. ROW_LIFT is half the
-// slack above a row's *ink*; this is the gap between where the font sets a '+' and
-// where it sets a cap, and under Gothic that came out at three sixteenths where the
-// row lift came out at a quarter. So a '+'
-// raised by it comes to rest on the cap line and a '-' dropped by it on the
-// baseline. Both stay inside the band the digits already ink, so no row of the
-// disc moves and the plate is sized exactly as before.
-#define SIGN_RISE(h) ((h) * 3 / 16)
+// The inside margin of the running countdown's filled box, left and right of the
+// glyph and the digits, as a fraction of the measured text height. layout_compute()
+// reserves it in both states, so the row is the same width whether or not the box
+// draws and nothing in it moves when an appointment starts.
+#define COUNT_PAD(h) ((h) / 6)
 
 // How the notification reading sits in its row. Side by side on the rectangles,
 // where the band under the dial is one wide row and the two read as a line;
