@@ -1,4 +1,5 @@
 #include <pebble.h>
+#include "digits.h"
 #include "events.h"
 #include "geometry.h"
 #include "slots.h"
@@ -16,7 +17,7 @@
 // bands spanning their duration with the quarter-hour notches cut through them;
 // tasks and reminders are wedges poking inward off the ruler. See strip.c.
 //
-// The clock is plain digits, level with the pointer — the strip says where in
+// The clock is drawn digits, level with the pointer — the strip says where in
 // the day you are, so the clock only has to say what time it is. The date, the
 // countdown, the next turn and whatever is running out stack beneath it, left-aligned
 // against the strip. See slots.c.
@@ -33,7 +34,6 @@
 
 static Window *s_window;
 static Layer  *s_root_layer;
-static GFont   s_num_font;
 static GFont   s_date_font;
 static GFont   s_slot_font;
 static GFont   s_tick_font;              // the strip's hour labels
@@ -76,7 +76,7 @@ static void mark_dirty(void) {
 
 static void root_update_proc(Layer *layer, GContext *ctx) {
   GRect b = layer_get_bounds(layer);
-  Layout lo = layout_compute(b, s_num_font, s_date_font, s_slot_font, s_tick_font);
+  Layout lo = layout_compute(b, NUM_CELL, s_date_font, s_slot_font, s_tick_font);
 
   graphics_context_set_antialiased(ctx, true);
   graphics_context_set_fill_color(ctx, COL_BG);
@@ -86,10 +86,14 @@ static void root_update_proc(Layer *layer, GContext *ctx) {
 
   // Each row cuts its own footprint out of the strip before drawing, so a marker
   // that spikes this far inward stops at the text instead of crossing it.
-  knock_out(ctx, text_plate(lo.num_box, s_num_font, s_time_buf));
-  graphics_context_set_text_color(ctx, COL_ACCENT);
-  graphics_draw_text(ctx, s_time_buf, s_num_font, lo.num_box,
-                     GTextOverflowModeFill, ROW_ALIGN, NULL);
+  // The clock is drawn rather than set — see digits.h — and its ink is exactly
+  // digits_size(), so centring it in the row is centring it on the pointer.
+  GSize cs = digits_size(s_time_buf, NUM_CELL);
+  knock_out(ctx, ink_plate(lo.num_box, cs.w));
+  digits_draw(ctx, s_time_buf,
+              GPoint(lo.num_box.origin.x,
+                     lo.num_box.origin.y + (lo.num_box.size.h - cs.h) / 2),
+              NUM_CELL, COL_ACCENT);
 
   knock_out(ctx, text_plate(lo.date_box, s_date_font, s_date_buf));
   graphics_context_set_text_color(ctx, COL_INK);
@@ -175,7 +179,6 @@ static void init(void) {
   // The firmware's own, at the size this platform wants — see theme.h. These are
   // handles into the firmware, not allocations, so there is nothing to unload and
   // nothing to fail: a bad key returns the fallback font rather than NULL.
-  s_num_font = fonts_get_system_font(FONT_NUM);
   s_date_font = fonts_get_system_font(FONT_DATE);
   s_slot_font = fonts_get_system_font(FONT_SLOT);
   s_tick_font = fonts_get_system_font(FONT_TICK);

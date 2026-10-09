@@ -122,3 +122,12 @@
 #  define FONT_DATE  FONT_KEY_GOTHIC_24_BOLD
 #  define FONT_SLOT  FONT_KEY_GOTHIC_24_BOLD
 #endif
+
+// The numbers in the disc — the day of the month and the countdown — are not set in
+// either font. They are the digital face's clock numerals, drawn on a lattice of
+// square cells (see digits.h), and DIGIT_CELL is the cell in pixels: a digit is 5 x 7
+// cells. Two is the smallest cell that still has a diagonal in it, and at two a digit
+// inks 14 px tall — the height Gothic 24's own digits ink on emery and gabbro, so the
+// weekday beside the day number keeps its size. On flint Gothic 18's digits ink 11, so
+// there the numbers stand three pixels taller than the caps beside them.
+#define DIGIT_CELL 2

@@ -199,7 +199,8 @@ watchface-digital/
 | --- | --- |
 | `proto.c` | Lifecycle, service handlers, paint order, the demo seed. |
 | `geometry.{c,h}` | The track, the vertical layout, chord fitting. |
-| `theme.h` | The whole palette and the three font choices. |
+| `theme.h` | The whole palette, the three font choices and the clock's cell size. |
+| `digits.{c,h}` | The clock's numerals, drawn on a lattice rather than set in a font. |
 | `events.{c,h}` | The event table, the live window, linger rules, countdown choice. |
 | `strip.{c,h}` | Bands, notches, markers, the pointer. |
 | `slots.{c,h}` | The three conditional rows and every glyph. |
@@ -215,10 +216,11 @@ app runs. `tools/make-menu-icon.py` draws it from the same primitives anyway and
 `resources/images/`, so the source of truth is still code — see *The launcher icon*
 below.
 
-**Every font is a system font, and there are no font resources at all.** Four roles
-(`FONT_NUM`, `FONT_DATE`, `FONT_SLOT`, `FONT_TICK`), selected per platform in `theme.h`
-by `PBL_PLATFORM_*`, each a `FONT_KEY_*` into the firmware. The clock is the LECO bold
-numerals; everything else is Gothic, bold for the rows and regular for the hour lane.
+**Every font is a system font, there are no font resources at all, and the clock is
+not a font.** Three roles (`FONT_DATE`, `FONT_SLOT`, `FONT_TICK`), selected per platform
+in `theme.h` by `PBL_PLATFORM_*`, each a `FONT_KEY_*` into the firmware: Gothic, bold for
+the rows and regular for the hour lane. The clock is drawn by `digits.c` — see *The
+clock's numerals* below.
 Pebble fonts are fixed-pixel resources either way, so one set scaled by the SDK was
 never an option — what the system set adds is that the pixels were fitted by hand at
 each size instead of rasterised from a TTF at build time, which is where the strokes
@@ -227,9 +229,9 @@ were being lost.
 Three consequences worth knowing:
 
 - **There is no `characterRegex` to maintain.** Gothic carries the full charset, so a
-  new glyph in a drawn string just draws. The clock's font is digits-and-colon only,
-  which is the one subset left and is not something you can widen — put a letter in
-  `s_time_buf` and it renders as a fallback box.
+  new glyph in a drawn string just draws. The clock is digits-and-colon only, and
+  `digits_draw` skips anything else without advancing — put a letter in `s_time_buf`
+  and it simply is not there.
 - **Nothing is loaded into the app's heap.** `fonts_get_system_font` returns a handle
   into the firmware, so there is nothing to unload and nothing that can fail to load.
 - **The size number is the pixel size**, and `graphics_text_layout_get_content_size`
@@ -288,20 +290,42 @@ against the fourteen of the Rajdhani `TICK_14` it replaced, so the lane got *nar
 free on `flint`, two pixels back into the content column on `emery`. `gabbro` keeps a
 size of its own, `GOTHIC_18`, for the same reason it always did.
 
-**The clock used to be the constraint on the whole layout, and it is not any more.**
-`"00:00"` in Orbitron measured 3.55 em, which put `flint` within a point of a ceiling of
-content-column-width ÷ 3.55. LECO measures it at 2.8, so the same column holds a clock
-four points larger: measured, `flint` has 22 px of column spare at `LECO_32_BOLD_NUMBERS`
-and `emery` 49 at `LECO_38_BOLD_NUMBERS`. The height the five rows share is the binding
-constraint now, and it binds on `flint`.
+### The clock's numerals
 
-The ceiling has not gone away, it has just stopped being close. Over the column width
-`graphics_draw_text` still does not complain — it wraps the minutes onto a second line
-or replaces them with an ellipsis — so it is still worth checking after a size change.
-What *has* gone is the trap that made checking it hard: Orbitron's digits were not
-tabular, a `1` being about half the width of a `0`, so `14:21` fit a box that `20:08`
-overflowed and the current time was never the honest test. LECO's are tabular. Every
-time of day is now the same width as every other.
+The clock is drawn from cells, not set in a font: `digits.c` holds each glyph as seven
+rows of five cells, and a cell is empty, full, or half-filled by a triangle cut at 45°.
+`NUM_CELL` in `theme.h` is the cell's size in pixels — 4 on `flint` and `gabbro`, 5 on
+`emery` — and is the whole of its metrics: `"00:00"` is 25 × 7 cells, 100 × 28 and
+125 × 35 px.
+
+- **Every edge is horizontal, vertical or exactly diagonal, and every corner is a whole
+  multiple of the cell.** That is the reason for drawing it. A 45° edge between whole-pixel
+  corners is a clean one-pixel staircase, so the diagonals come out the same on `flint`
+  with no antialiasing as on colour, at any cell size. The fonts this face used before
+  LECO were lost exactly here, in a build-time rasteriser rounding strokes it could not
+  place.
+- **A pixel whose centre lies on a hypotenuse is ink, on every triangle.** With
+  whole-pixel corners a 45° line passes through a pixel centre on every row, so the tie
+  rule decides real pixels. Inside on all four triangle kinds keeps chamfers symmetric —
+  a mirrored glyph comes out mirrored — and adds back some of the weight a diagonal loses
+  to its angle: one cell wide across the row is only seven tenths of a stem measured
+  square to the stroke.
+- **The digits are tabular, the colon is one cell and every gap is one cell**, so every
+  time of day is the same width as every other and `"00:00"` is the honest measurement.
+  In 12-hour style the dropped leading zero shortens the row by a digit and a gap; the
+  row is left-aligned, so nothing else moves.
+- **The ink is the box.** `digits_size()` has no slack above or below, so `clock_top`
+  centres the row on the pointer with no correction — see *Design decisions* below.
+
+**The clock is not the constraint on the layout.** It inks 100 × 28 on `flint` where LECO
+inked about 82 × 22, but LECO's row was its 32 px content box plus six, and the
+lattice's is its ink plus six — 34 — so the stack beside the strip got four pixels of
+height back while the clock got larger. The width costs more: measured, the ink ends 8 px
+short of the margin on `flint` and 28 on `emery` — not enough there for another step of
+`NUM_CELL`, which is 25. Over the column width nothing complains — `digits_draw`
+does not wrap — so **re-measure on `flint` after any change to `NUM_CELL` or to a
+glyph's width.** On `gabbro` the clock's width is what places the strip, 25 px per step
+of `NUM_CELL`, so a step up there costs the strip length.
 
 ## Design decisions that look like bugs
 
@@ -344,12 +368,12 @@ code; this is the index.
   the two are the same y today; the measurement stays on the shape because the eye lines
   up with the shape, and a track that is not horizontal would otherwise leave the clock
   floating off the mark.
-- **The clock is centred on its ink, not on its content box, and the correction is
-  measured rather than derived.** See `layout_compute`. A digits-and-colon subset never
-  descends below the baseline, so the box has more slack above the glyphs than below and
-  centring the box leaves them low — two pixels on `flint`. The TTF's own `hhea` metrics
-  predict the opposite sign, because what the SDK lays out to is the generated
-  resource's metrics, not the source font's.
+- **The clock's row is centred on the pointer with no correction, and the hour labels
+  still need one.** See `clock_top`. The clock is drawn, so its ink is exactly
+  `digits_size()` and `proto.c` puts it in the middle of its box. A font's content box
+  is not symmetric about its glyphs — LECO's left the digits two pixels low on `flint`
+  and took a measured lift of a twentieth of its height — and the hour labels, still
+  Gothic, keep theirs.
 - **Coverage is one byte per minute, not per pixel or per degree.** See `s_cov` in
   `strip.c`. A minute is under a pixel of track on all three displays, so quantising to
   one is free. 241 bytes, 301 on `gabbro` — less than the dial's 360; the array is sized from
@@ -496,9 +520,9 @@ code; this is the index.
   information; dropping this one loses a repetition.
 - **An hour label is placed by the same `step_in` the markers use, and branches on
   nothing.** `label_x` is a depth along the ray, so the lane is a vertical column
-  beside the strip. Its vertical correction is `ts.h / 6`, not
-  the clock's `ts.h / 20`: Gothic keeps more of its box above the caps than LECO does,
-  and at this size that difference is the whole correction. Measured off a flint
+  beside the strip. Its vertical correction is `ts.h / 6`, not the
+  `ts.h / 20` the clock took when it was LECO: Gothic keeps more of its box above the
+  caps than LECO did, and at this size that difference is the whole correction. Measured off a flint
   screenshot — in a 14 px `GOTHIC_14` box the digits ink rows 5 to 13, so all five pixels
   of slack are above them and half of that is the lift. At this size integer division is
   a design decision: the eighth the Rajdhani resource wanted truncates to one here and

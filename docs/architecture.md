@@ -243,13 +243,14 @@ Kotlin + Jetpack Compose, `namespace link.dendritik.proto.pipe`.
 | `PipeCompanionService` | The host. Bound by the system while the associated watch is nearby. |
 | `PipeService` | The fallback host: a foreground service, the notification that costs, and Android 15's six-hour cap on it. |
 | `PipeHost` | `chooseHost`, and the `CompanionDeviceManager` calls around it. |
-| `CalendarSource` | Queries `CalendarContract.Instances` over the window the watch can draw. |
+| `CalendarSource` | Queries `CalendarContract.Instances` over the window the watch can draw, from the calendars the user has chosen to send. |
+| `CalendarChoice` / `CalendarPrefs` | Pure: which calendars are sent. And where that choice is kept, which the engine listens to. |
 | `CalendarWatcher` | `ContentObserver` plus `ACTION_PROVIDER_CHANGED`. |
 | `PhoneBattery` | `ACTION_BATTERY_CHANGED`, filtered to whole-percent changes. |
 | `EventBlob` / `EventDiff` | Pure. Packing and diffing, covered by JVM unit tests. |
 | `PebbleSender` | Debounce, coalesce, dedup, chunk, and the heartbeat the tick owes. |
 | `BootReceiver` | Restarts the service after a reboot. |
-| `MainActivity` | The three grants the hosts cannot get themselves, the pairing dialog, the diagnostics and the manual re-sync. |
+| `MainActivity` | The three grants the hosts cannot get themselves, the pairing dialog, the calendar choice, the diagnostics and the manual re-sync. |
 | `PipeStatus` | Observable diagnostics. Written by everything, read only by the screen. |
 
 Framework types stop at `CalendarSource`. Everything below it sees `EventFacts`, which
@@ -315,8 +316,9 @@ the app says so.
    alarm alone, because re-arming on a press would slide the declared cadence a full
    period.
 2. `CalendarSource` scans `[now − 3 h, now + 6 h]`, excluding whole-day entries — they
-   have no position on a timeline and no duration that would fit one — and anything
-   cancelled. Duration comes from `END - BEGIN`; a zero-length instance is a reminder.
+   have no position on a timeline and no duration that would fit one — anything
+   cancelled, and every calendar the user has not chosen to send. That last filter is
+   in the query itself, so an unticked calendar's entries are never read. Duration comes from `END - BEGIN`; a zero-length instance is a reminder.
 
    The phone's window deliberately covers every face's — `[now − 1 h, now + 3 h]` on
    the digital one's rectangles, `[now − 3 h, now + 3 h]` on its round display, and

@@ -17,7 +17,8 @@ import link.dendritik.proto.pipe.protocol.WireIds
  * the linger a passed marker gets, which is as far back as the deepest face looks
  * (the digital face on the round display, three hours either side of now) — so a
  * scan is small and a diff between two scans is smaller. Whole-day entries are excluded in the query: they have no position on
- * a twelve-hour dial.
+ * a twelve-hour dial. So is every calendar the user has not chosen to send — see
+ * [CalendarChoice].
  *
  * Framework types stop here. Everything downstream sees [EventFacts], which is what
  * lets the packing and diffing logic be unit-tested with no device.
@@ -28,8 +29,54 @@ class CalendarSource(private val context: Context) {
         ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) ==
             PackageManager.PERMISSION_GRANTED
 
-    fun query(nowMs: Long): List<EventFacts> {
+    /**
+     * Every calendar on the phone, for the settings screen and for turning a choice into
+     * row ids. Empty without the grant, which the screen reads as nothing to choose from.
+     */
+    fun calendars(): List<CalendarInfo> {
         if (!hasPermission()) return emptyList()
+        val out = mutableListOf<CalendarInfo>()
+        try {
+            context.contentResolver.query(
+                CalendarContract.Calendars.CONTENT_URI, CALENDAR_PROJECTION, null, null,
+                CALENDAR_SORT,
+            )?.use { c ->
+                while (c.moveToNext()) {
+                    val id = c.getLong(0)
+                    val account = c.getString(2)
+                    out += CalendarInfo(
+                        id = id,
+                        key = CalendarChoice.key(id, c.getString(1), account, c.getString(3)),
+                        name = c.getString(4) ?: account ?: "Calendar $id",
+                        account = account.orEmpty(),
+                        color = c.getInt(5),
+                    )
+                }
+            }
+        } catch (e: SecurityException) {
+            Log.w(TAG, "calendar list denied", e)
+            return emptyList()
+        }
+        return out
+    }
+
+    /**
+     * The window, from the calendars [chosen] allows — every calendar when it is `null`.
+     *
+     * The filter is in the query, not applied afterwards, so an unticked calendar's
+     * entries are never read, let alone sent.
+     */
+    fun query(nowMs: Long, chosen: Set<String>?): List<EventFacts> {
+        if (!hasPermission()) return emptyList()
+
+        // Row ids are resolved afresh on every scan rather than cached: they are what
+        // changes under a re-added account, and the keys are what does not.
+        val ids = CalendarChoice.sentIds(calendars(), chosen)
+        if (ids != null && ids.isEmpty()) return emptyList()
+        val selection = if (ids == null) SELECTION else {
+            // Longs straight from the provider, so inlining them cannot inject anything.
+            "$SELECTION AND ${CalendarContract.Instances.CALENDAR_ID} IN (${ids.joinToString(",")})"
+        }
 
         val begin = nowMs - WINDOW_BACK_MS
         val end = nowMs + WINDOW_AHEAD_MS
@@ -41,7 +88,7 @@ class CalendarSource(private val context: Context) {
 
         val out = mutableListOf<EventFacts>()
         try {
-            context.contentResolver.query(uri, PROJECTION, SELECTION, null, SORT)?.use { c ->
+            context.contentResolver.query(uri, PROJECTION, selection, null, SORT)?.use { c ->
                 while (c.moveToNext()) {
                     val eventId = c.getLong(0)
                     val beginMs = c.getLong(1)
@@ -125,5 +172,17 @@ class CalendarSource(private val context: Context) {
             " OR ${CalendarContract.Instances.STATUS} != ${CalendarContract.Events.STATUS_CANCELED})"
 
         const val SORT = "${CalendarContract.Instances.BEGIN} ASC"
+
+        val CALENDAR_PROJECTION = arrayOf(
+            CalendarContract.Calendars._ID,
+            CalendarContract.Calendars.ACCOUNT_TYPE,
+            CalendarContract.Calendars.ACCOUNT_NAME,
+            CalendarContract.Calendars._SYNC_ID,
+            CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
+            CalendarContract.Calendars.CALENDAR_COLOR,
+        )
+
+        const val CALENDAR_SORT = "${CalendarContract.Calendars.ACCOUNT_NAME} ASC, " +
+            "${CalendarContract.Calendars.CALENDAR_DISPLAY_NAME} ASC"
     }
 }

@@ -1,4 +1,5 @@
 #include "slots.h"
+#include "digits.h"
 #include "events.h"
 #include "theme.h"
 #include "wbatt.h"
@@ -307,14 +308,10 @@ typedef struct {
 
 // The glyph-to-number gap is SLOT_GAP, in geometry.h, because the plate is sized
 // against the same numbers this lays out with.
-static SlotBoxes slot_layout(GRect box, GFont font, const char *text,
-                             GTextAlignment align) {
-  GSize ts = GSize(0, 0);
-  if (text && text[0]) {
-    ts = graphics_text_layout_get_content_size(text, font, box,
-                                               GTextOverflowModeFill,
-                                               GTextAlignmentLeft);
-  }
+//
+// `ts` is the number's size, measured by the caller: text_size() for a string set in
+// the slot font, digits_size() for the countdown's drawn digits.
+static SlotBoxes slot_layout(GRect box, GSize ts, GTextAlignment align) {
 
   // 85% of the box's height, not all of it: the box carries the font's ascender
   // and descender, and a glyph matched to the cap height reads as the same size
@@ -362,6 +359,12 @@ static SlotBoxes slot_layout(GRect box, GFont font, const char *text,
   };
 }
 
+static GSize text_size(GRect box, GFont font, const char *text) {
+  if (!text || !text[0]) return GSize(0, 0);
+  return graphics_text_layout_get_content_size(text, font, box, GTextOverflowModeFill,
+                                               GTextAlignmentLeft);
+}
+
 static void fmt_distance(char *buf, size_t n, int tenths, int unit) {
   static const char *const ABBR[] = { "M", "KM", "FT", "MI" };
   const char *u = ABBR[(unit >= NAV_UNIT_M && unit <= NAV_UNIT_MAX) ? unit : NAV_UNIT_M];
@@ -376,7 +379,7 @@ static void fmt_distance(char *buf, size_t n, int tenths, int unit) {
 // The rows
 // ---------------------------------------------------------------------------
 
-void slots_draw_count(GContext *ctx, const Layout *lo, GFont font, time_t now) {
+void slots_draw_count(GContext *ctx, const Layout *lo, time_t now) {
   // Calendar markers and this countdown stay on show even when the companion is
   // gone. An entry is timestamped and ages out on its own, so it does not go
   // stale the way a count does — and the notification band is already saying the
@@ -398,34 +401,23 @@ void slots_draw_count(GContext *ctx, const Layout *lo, GFont font, time_t now) {
   // digits, and digits at slot size need the darker end of the same warm family.
   GColor ink = (p.kind == EV_TASK && !p.running) ? COL_WARN : COL_BAND;
 
-  SlotBoxes b = slot_layout(lo->count_box, font, digits, GTextAlignmentCenter);
-
-  // The glyph and the box are both centred on the digits' ink rather than on the
-  // row. Gothic sets its baseline on the text box's last row, so it sits ROW_LIFT
-  // above the row's h, and digits stand five eighths of the text height above that
-  // (measured: 11 of 18 on flint, 14 of 24 elsewhere). The ink therefore sits low
-  // in the row, and on flint's 18 px rows the rounding leaves it a pixel lower than
-  // the row's centre, which is where slot_layout() puts the glyph. A glyph centred
-  // high and digits sitting low would leave the box no way to clear both evenly.
-  // At 24 px the two centres agree and nothing moves.
-  GSize ts = graphics_text_layout_get_content_size(digits, font, lo->count_box,
-                                                   GTextOverflowModeFill,
-                                                   GTextAlignmentLeft);
-  int16_t ink_bot = lo->count_box.origin.y + ts.h - ROW_LIFT(ts.h);
-  int16_t ink_mid = (ink_bot - ts.h * 5 / 8 + ink_bot) / 2;
+  // Drawn, not set — see digits.h — so the ink is exactly digits_size() and the
+  // row's centre is the ink's. The glyph, the digits and the running box all centre on
+  // it, with none of the measured lift a font's box needs.
+  GSize ts = digits_size(digits, lo->cell);
+  SlotBoxes b = slot_layout(lo->count_box, ts, GTextAlignmentCenter);
+  int16_t ink_mid = lo->count_box.origin.y + lo->count_box.size.h / 2;
   b.glyph.origin.y = ink_mid - b.glyph.size.h / 2;
+  GPoint at = GPoint(b.text.origin.x, ink_mid - ts.h / 2);
 
   if (p.running) {
-    // COUNT_PAD either side, which layout_compute() reserved in both states, so
+    // COUNT_PAD on every side, which layout_compute() reserved in both states, so
     // the content sits in the same place whether or not the box is behind it. The
-    // row's own height, which ROW_H has already trimmed to the ink plus a few
-    // pixels of air, centred on the ink. On flint that puts the box's bottom a
-    // pixel below the row box. Nothing is under it there, and the rounded corner
-    // is what the plate is sized against.
+    // row is the ink plus that pad above and below, so the box is the row.
     int16_t pad = COUNT_PAD(ts.h);
-    int16_t bh = ROW_H(ts.h);
+    int16_t bh = lo->count_box.size.h;
     int16_t x0 = b.glyph.origin.x - pad;
-    int16_t x1 = b.text.origin.x + ts.w + pad;
+    int16_t x1 = at.x + ts.w + pad;
     GRect fill = GRect(x0, ink_mid - bh / 2, x1 - x0, bh);
     graphics_context_set_fill_color(ctx, COL_BAND);
     graphics_fill_rect(ctx, fill, pad, GCornersAll);
@@ -435,9 +427,7 @@ void slots_draw_count(GContext *ctx, const Layout *lo, GFont font, time_t now) {
   if (p.kind == EV_TASK && !p.running) glyph_task(ctx, b.glyph, ink);
   else glyph_calendar(ctx, b.glyph, ink);
 
-  graphics_context_set_text_color(ctx, ink);
-  graphics_draw_text(ctx, digits, font, b.text, GTextOverflowModeFill,
-                     GTextAlignmentLeft, NULL);
+  digits_draw(ctx, digits, at, lo->cell, ink);
 }
 
 void slots_draw_nav(GContext *ctx, const Layout *lo, GFont font) {
@@ -446,7 +436,7 @@ void slots_draw_nav(GContext *ctx, const Layout *lo, GFont font) {
   char text[16] = "";
   fmt_distance(text, sizeof text, wire_nav_distance(), wire_nav_unit());
 
-  SlotBoxes b = slot_layout(lo->nav_box, font, text, NAV_ALIGN);
+  SlotBoxes b = slot_layout(lo->nav_box, text_size(lo->nav_box, font, text), NAV_ALIGN);
 
   glyph_maneuver(ctx, b.glyph, wire_nav_maneuver(), COL_INK);
   graphics_context_set_text_color(ctx, COL_INK);
@@ -527,7 +517,7 @@ void slots_draw_warn(GContext *ctx, const Layout *lo, GFont font) {
                 box.origin.x + box.size.w - x0, box.size.h);
   }
 
-  SlotBoxes b = slot_layout(box, font, text, WARN_ALIGN);
+  SlotBoxes b = slot_layout(box, text_size(box, font, text), WARN_ALIGN);
 
   switch (which) {
     case T_DOWN:  glyph_phone(ctx, b.glyph, true, ink); break;

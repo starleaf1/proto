@@ -316,11 +316,11 @@ static void draw_hour_label(GContext *ctx, const Layout *lo, GFont font,
   Track tr = track_at(lo, u);
   GPoint q = step_in(tr.p, tr.a, lo->label_x + lo->label_w / 2);
 
-  // The same measured lift the clock takes, and for the same reason: digits never
-  // descend below the baseline, so the box carries its slack above the ink and centring
-  // the box leaves them low. A sixth, not the clock's twentieth — Gothic keeps more of
-  // its box above the caps than LECO does, and at this size the difference is the whole
-  // correction. Measured off a flint screenshot: in a 14 px GOTHIC_14 box the digits ink
+  // A measured lift, because digits never descend below the baseline, so the box
+  // carries its slack above the ink and centring the box leaves them low. The clock
+  // took the same correction while it was LECO, at a twentieth; it is drawn now and
+  // needs none, and Gothic keeps more of its box above the caps than LECO did, so this
+  // one is a sixth. Measured off a flint screenshot: in a 14 px GOTHIC_14 box the digits ink
   // rows 5..13, so all five pixels of slack are above them and half of that is the lift.
   // Two on flint and emery, three on gabbro's GOTHIC_18, which is the one place this
   // being a fraction rather than a constant earns its keep.

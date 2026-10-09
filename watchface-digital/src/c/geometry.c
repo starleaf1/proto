@@ -1,4 +1,5 @@
 #include "geometry.h"
+#include "digits.h"
 #include "theme.h"
 
 #define EDGE_MARGIN_MIN 3
@@ -94,11 +95,15 @@ GRect text_plate(GRect box, GFont font, const char *text) {
   if (!text || !text[0]) return GRect(box.origin.x, box.origin.y, 0, 0);
   GSize ts = graphics_text_layout_get_content_size(
       text, font, box, GTextOverflowModeFill, ROW_ALIGN);
+  return ink_plate(box, ts.w);
+}
+
+GRect ink_plate(GRect box, int16_t w) {
   // A pixel of pad on the leading edge, two on the trailing one. `zone` carries exactly
   // two pixels of clearance past the pointer's base, so a plate reaching two back would
   // sit on the pointer itself.
   int16_t pad = 2;
-  return GRect(box.origin.x - 1, box.origin.y, ts.w + 1 + pad, box.size.h);
+  return GRect(box.origin.x - 1, box.origin.y, w + 1 + pad, box.size.h);
 }
 
 void knock_out(GContext *ctx, GRect r) {
@@ -294,17 +299,11 @@ static void place_strip(Layout *lo, int16_t x) {
 // Where the clock's box goes, for the strip as it is placed: its ink level with the
 // pointer's body.
 //
-// A content box is not symmetric about the glyphs in it: Pebble's font resources
-// carry their own ascent and descent, and a digits-and-colon subset never puts
-// anything below the baseline, so the box has more slack above the ink than
-// below and centring the box leaves the digits sitting low. Measured off a
-// flint screenshot: with the box centred on the pointer at y 43, the ink came
-// out spanning 31..59 — centre 45, two pixels down.
-//
-// The correction is a fraction of the numeral's own height rather than a pixel
-// count, so it scales with the font, and it is measured rather than derived: the
-// TTF's hhea metrics predict the opposite sign, because what the SDK lays out to
-// is the generated resource's metrics and not the source font's.
+// Centring the box is centring the ink. The digits are drawn, not set, so the ink is
+// exactly digits_size() with nothing above or below it, and proto.c draws it in the
+// middle of a box `num_h` tall. A font's box was not like that — LECO kept more slack
+// above its digits than below and needed a measured lift of a twentieth of its height,
+// which went when the font did.
 //
 // And it goes on the *pointer*, not on the point of the track the pointer marks.
 // The ray is horizontal on every display now, so those are the same y, but the
@@ -312,7 +311,7 @@ static void place_strip(Layout *lo, int16_t x) {
 // what to measure — whichever shape this display's "now" is. On colour that is a rule
 // struck across the strip and its middle is half its length in; on flint it is the
 // wedge, whose body starts past the notch zone.
-static int16_t clock_top(const Layout *lo, int16_t ns_h, int16_t num_h, int16_t span_top) {
+static int16_t clock_top(const Layout *lo, int16_t num_h, int16_t span_top) {
   Track ptr = track_at(lo, STRIP_BACK_S);
 #ifdef PBL_COLOR
   int16_t p_mid = lo->rule_len / 2;
@@ -320,12 +319,12 @@ static int16_t clock_top(const Layout *lo, int16_t ns_h, int16_t num_h, int16_t 
   int16_t p_mid = lo->ptr_tip + lo->notch_len * POINTER_LEN_PCT / 100 / 2;
 #endif
   int16_t py = step_in(ptr.p, ptr.a, p_mid).y;
-  int16_t top = py - num_h / 2 - ns_h / 20;
+  int16_t top = py - num_h / 2;
   if (top < span_top) top = span_top;
   return top;
 }
 
-Layout layout_compute(GRect bounds, GFont num_font, GFont date_font,
+Layout layout_compute(GRect bounds, int16_t num_cell, GFont date_font,
                       GFont slot_font, GFont tick_font) {
   Layout lo;
   lo.bounds = bounds;
@@ -382,12 +381,11 @@ Layout layout_compute(GRect bounds, GFont num_font, GFont date_font,
   // gave way to a filled box, and the box's margin is narrower than the '+' was. It
   // stays as the slot rows' stand-in width because gabbro's span_bot is solved from
   // it, and a narrower one would lower the warnings row into a narrower chord for
-  // readings that were never measured against it. "00:00" is also the widest the clock ever gets, and the clock
-  // is what the whole column's width is budgeted against — Orbitron is a wide face
-  // and five glyphs of it is the binding constraint on this layout.
+  // readings that were never measured against it. "00:00" is the clock's width at
+  // every time of day, its digits being tabular, and on gabbro it is what places the
+  // strip.
   GRect measure = GRect(0, 0, bounds.size.w, bounds.size.h);
-  GSize ns = graphics_text_layout_get_content_size(
-      "00:00", num_font, measure, GTextOverflowModeFill, GTextAlignmentCenter);
+  GSize ns = digits_size("00:00", num_cell);
   GSize ds = graphics_text_layout_get_content_size(
       "MON 22", date_font, measure, GTextOverflowModeFill, GTextAlignmentCenter);
   GSize ss = graphics_text_layout_get_content_size(
@@ -414,7 +412,7 @@ Layout layout_compute(GRect bounds, GFont num_font, GFont date_font,
   int16_t x = lo.center.x;
   for (; x > x_min; x--) {
     place_strip(&lo, x);
-    int16_t t = clock_top(&lo, ns.h, num_h, span_top);
+    int16_t t = clock_top(&lo, num_h, span_top);
     if (fit_row(GRect(bounds.origin.x, t, bounds.size.w, num_h), &lo).size.w
         >= ns.w + margin) break;
   }
@@ -458,7 +456,7 @@ Layout layout_compute(GRect bounds, GFont num_font, GFont date_font,
   int16_t gap_d = ds.h / 4;
 
   // The clock's ink goes level with the pointer's body — see clock_top().
-  int16_t top = clock_top(&lo, ns.h, num_h, span_top);
+  int16_t top = clock_top(&lo, num_h, span_top);
 
   // Pinned at both ends. The clock's centre goes on the pointer; the warnings row
   // goes on the bottom.

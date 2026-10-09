@@ -16,7 +16,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -25,8 +27,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -41,9 +46,15 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import link.dendritik.proto.pipe.calendar.CalendarChoice
+import link.dendritik.proto.pipe.calendar.CalendarInfo
+import link.dendritik.proto.pipe.calendar.CalendarPrefs
+import link.dendritik.proto.pipe.calendar.CalendarSource
 import link.dendritik.proto.pipe.pebble.PebbleSender
 import link.dendritik.proto.pipe.ui.theme.ProtoPipeTheme
 import kotlinx.coroutines.delay
@@ -51,7 +62,8 @@ import kotlinx.coroutines.launch
 import java.util.Date
 
 /**
- * Diagnostics, and the three grants the hosts cannot get for themselves.
+ * Diagnostics, the three grants the hosts cannot get for themselves, and the one
+ * setting: which calendars are sent.
  *
  * Calendar access is a runtime permission. Notification access is needed only by the
  * foreground-service host, so it is asked for only when that is the host we are heading
@@ -63,6 +75,12 @@ class MainActivity : ComponentActivity() {
     private var calendarGranted by mutableStateOf(false)
     private var notificationsGranted by mutableStateOf(true)
     private var associated by mutableStateOf(false)
+    private var calendars by mutableStateOf(emptyList<CalendarInfo>())
+    private var chosen by mutableStateOf<Set<String>?>(null)
+
+    // Lazy because both need a Context, and the activity is not one until onCreate.
+    private val calendarSource by lazy { CalendarSource(this) }
+    private val calendarPrefs by lazy { CalendarPrefs(this) }
 
     private val requestPermissions = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -84,12 +102,15 @@ class MainActivity : ComponentActivity() {
                         calendarGranted = calendarGranted,
                         notificationsGranted = notificationsGranted,
                         associated = associated,
+                        calendars = calendars,
+                        chosen = chosen,
                         canAssociate = Build.VERSION.SDK_INT >= MIN_COMPANION_SDK,
                         fallbackCapped = Build.VERSION.SDK_INT >= FGS_TIMEOUT_SDK,
                         onGrant = ::ask,
                         onPair = ::pairWatch,
                         onUnpair = ::unpairWatch,
                         onResync = ::resyncNow,
+                        onSetSent = ::setSent,
                     )
                 }
             }
@@ -112,6 +133,8 @@ class MainActivity : ComponentActivity() {
             else -> granted(Manifest.permission.POST_NOTIFICATIONS)
         }
         PipeStatus.calendarGranted = calendarGranted
+        calendars = calendarSource.calendars()
+        chosen = calendarPrefs.chosen()
         PipeStatus.host = hostAhead()
         // The engine's reconcile() is the only other writer of this, so on screen it can
         // be a whole tick period out of date — and it is what gates the re-sync button.
@@ -168,6 +191,17 @@ class MainActivity : ComponentActivity() {
     private fun resyncNow() {
         PipeStatus.resync = Resync.REQUESTED
         PipeEngine.requestResync(this)
+    }
+
+    /**
+     * One checkbox. Writing the choice is the whole of it: the engine is listening to the
+     * same preferences and re-scans on the change, so there is no message to send from
+     * here, and with no engine running the next start reads the choice anyway.
+     */
+    private fun setSent(key: String, send: Boolean) {
+        val next = CalendarChoice.toggle(calendars, chosen, key, send)
+        calendarPrefs.setChosen(next)
+        chosen = next
     }
 
     // ---------------------------------------------------------------------------
@@ -229,12 +263,15 @@ private fun StatusScreen(
     calendarGranted: Boolean,
     notificationsGranted: Boolean,
     associated: Boolean,
+    calendars: List<CalendarInfo>,
+    chosen: Set<String>?,
     canAssociate: Boolean,
     fallbackCapped: Boolean,
     onGrant: () -> Unit,
     onPair: () -> Unit,
     onUnpair: () -> Unit,
     onResync: () -> Unit,
+    onSetSent: (key: String, send: Boolean) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     var spinning by remember { mutableStateOf(false) }
@@ -261,6 +298,10 @@ private fun StatusScreen(
             Button(onClick = onGrant, modifier = Modifier.fillMaxWidth()) {
                 Text("Grant access")
             }
+        }
+
+        if (calendarGranted) {
+            CalendarsCard(calendars, chosen, onSetSent)
         }
 
         if (canAssociate) {
@@ -383,6 +424,8 @@ private fun StatusScreen(
  */
 private const val SPINNER_MIN_MS = 450L
 
+private const val OPAQUE = 0xFF shl 24
+
 /** A time of day in the user's own format, or an em dash before the first send. */
 private fun lastSyncText(context: Context, atMs: Long): String =
     if (atMs == 0L) "—" else DateFormat.getTimeFormat(context).format(Date(atMs))
@@ -393,6 +436,63 @@ private fun resyncText(state: Resync): String? = when (state) {
     Resync.REQUESTED -> "Nothing answered — no engine is running."
     Resync.SENT -> "Flushed the window to the watch."
     Resync.NOTHING_SENT -> "Nothing went out — check the link."
+}
+
+/**
+ * The calendar choice. Only calendars that are ticked are read at all — the filter is
+ * in the query — so an unticked one never leaves the phone.
+ */
+@Composable
+private fun CalendarsCard(
+    calendars: List<CalendarInfo>,
+    chosen: Set<String>?,
+    onSetSent: (key: String, send: Boolean) -> Unit,
+) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("Calendars sent to the watch", style = MaterialTheme.typography.titleMedium)
+            Text(
+                if (calendars.isEmpty()) {
+                    "There are no calendars on this phone."
+                } else if (chosen == null) {
+                    "Every calendar is sent. Untick one to keep it off the watch — from " +
+                        "then on, a calendar added later stays off until you tick it."
+                } else {
+                    "Only ticked calendars are sent. A calendar added later stays off " +
+                        "until you tick it."
+                },
+                style = MaterialTheme.typography.bodySmall,
+            )
+            for (cal in calendars) {
+                val sent = CalendarChoice.isSent(cal.key, chosen)
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .toggleable(
+                            value = sent,
+                            role = Role.Checkbox,
+                            onValueChange = { onSetSent(cal.key, it) },
+                        ),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Checkbox(checked = sent, onCheckedChange = null)
+                    Spacer(Modifier.width(12.dp))
+                    // Forced opaque: providers do not all fill in the alpha byte.
+                    Box(
+                        Modifier.size(12.dp)
+                            .background(Color(cal.color or OPAQUE), CircleShape),
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.padding(vertical = 8.dp)) {
+                        Text(cal.name)
+                        if (cal.account.isNotEmpty() && cal.account != cal.name) {
+                            Text(cal.account, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable

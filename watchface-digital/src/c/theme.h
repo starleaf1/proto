@@ -76,7 +76,15 @@
 #define COL_ALERT       PBL_IF_COLOR_ELSE(GColorRed, GColorBlack)
 #define COL_WARN        PBL_IF_COLOR_ELSE(GColorWindsorTan, GColorBlack)
 
-// Four fonts, all of them the firmware's own.
+// Three fonts, all of them the firmware's own, and a clock that is not a font at all.
+//
+// The clock is drawn from cells — see digits.h. NUM_CELL is the lattice's cell size in
+// pixels, and the whole of its metrics: a digit is 5 cells wide and 7 tall, the colon 1
+// wide, the gaps a cell each, so "00:00" is 25 x 7 cells. It was LECO, which inked
+// "10:42" about 82 x 22 on flint and 95 x 24 on gabbro; a cell of 4 puts the clock at
+// 100 x 28 there, the nearest the lattice comes. NUM_CELL can be any size — the
+// diagonals are clean at every one, which is the point of drawing it — so emery, with
+// the room, takes a size up.
 //
 // They were Orbitron and Rajdhani SemiBold, compiled in as subsetted TTF resources at
 // a size per platform. What the SDK does with a TTF is rasterise it once at build time,
@@ -120,28 +128,19 @@
 // to it exactly — unlike the TTF resources, whose number was an em and whose height was
 // not. So a row's height is now readable off this table.
 //
-// Two traps the Orbitron ceiling left behind, both gone:
-//
-//  - The clock no longer has a width ceiling worth the name. Orbitron put "00:00" at
-//    3.55 em, which made the clock the binding constraint on the whole column and flint
-//    within a point of its own limit; LECO puts it at 2.8, so the same column holds a
-//    clock four points larger. flint has 22 px spare at LECO_32 and emery 49 at LECO_38.
-//  - LECO's digits are tabular, where Orbitron's were not — a "1" was half the width of
-//    a "0" there, so "14:21" fit a box "20:08" overflowed and the current time was never
-//    the honest test. Every digit is the same width now.
-//
-// What still holds: over the column width graphics_draw_text does not complain, it wraps
-// the minutes onto a second line or ellipsises them. And the date and the slots are what
-// seat five rows in the height that is left, which is the tighter constraint on flint.
-// Measure before changing any of them — what fits is a property of the layout, not of
-// this table.
+// The table's "00:00" column is LECO's, and is history now: the clock is 100 x 28 on
+// flint and gabbro and 125 x 35 on emery (digits_size()). What still holds: the date
+// and the slots are what seat five rows in the height that is left, which is the
+// tighter constraint on flint, and the clock's row is its ink plus six — 34 on flint
+// against LECO's 38, so the lattice gave the stack height back. Measure before
+// changing any of them — what fits is a property of the layout, not of this table.
 #if defined(PBL_PLATFORM_FLINT)
-#  define FONT_NUM   FONT_KEY_LECO_32_BOLD_NUMBERS
+#  define NUM_CELL   4
 #  define FONT_DATE  FONT_KEY_GOTHIC_18_BOLD
 #  define FONT_SLOT  FONT_KEY_GOTHIC_14_BOLD
 #  define FONT_TICK  FONT_KEY_GOTHIC_14
 #elif defined(PBL_PLATFORM_EMERY)
-#  define FONT_NUM   FONT_KEY_LECO_38_BOLD_NUMBERS
+#  define NUM_CELL   5
 #  define FONT_DATE  FONT_KEY_GOTHIC_28_BOLD
 #  define FONT_SLOT  FONT_KEY_GOTHIC_24_BOLD
 #  define FONT_TICK  FONT_KEY_GOTHIC_14
@@ -151,10 +150,10 @@
 //
 // That chord is what places the strip. layout_compute steps the strip left from the
 // centre of the glass until the clock's row, level with the pointer, is as wide as
-// ns.w — so every pixel FONT_NUM gains, and every pixel the hour lane gains (label_w is
-// inside `zone`), pushes the strip further left, where the chord and so the strip itself
-// are shorter. Change either and re-measure on the emulator before trusting it.
-#  define FONT_NUM   FONT_KEY_LECO_36_BOLD_NUMBERS
+// ns.w — so every pixel the clock gains (25 per step of NUM_CELL), and every pixel the
+// hour lane gains (label_w is inside `zone`), pushes the strip further left, where the
+// chord and so the strip itself are shorter. Change either and re-measure on the emulator before trusting it.
+#  define NUM_CELL   4
 #  define FONT_DATE  FONT_KEY_GOTHIC_28_BOLD
 #  define FONT_SLOT  FONT_KEY_GOTHIC_24_BOLD
 // The one lane that is bigger here than on the rectangles, as it was before: the label

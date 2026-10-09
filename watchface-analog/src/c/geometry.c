@@ -1,4 +1,5 @@
 #include "geometry.h"
+#include "digits.h"
 #include "theme.h"
 
 #define EDGE_MARGIN_MIN 3
@@ -229,32 +230,24 @@ int16_t chord_half(int16_t r, int16_t dy) {
 // Layout
 // ---------------------------------------------------------------------------
 
-// The widest line update_buffers() can print, weekday first and then the day of
-// the month against it: 7 + 31 measurements rather than 7 x 31, which is exact as
-// long as a weekday's width does not depend on the digits after it.
-static GSize widest_date(GFont font, GRect measure) {
+// The widest weekday update_buffers() can print. The day of the month beside it is
+// drawn rather than set, and its digits are tabular, so "00" is every day's width and
+// only the weekday needs searching.
+static GSize widest_wday(GFont font, GRect measure) {
   static const char *const days[] = { "SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT" };
-  char buf[8];
   GSize best = GSize(0, 0);
-  const char *wide = days[0];
   for (int i = 0; i < 7; i++) {
-    snprintf(buf, sizeof buf, "%s 00", days[i]);
     GSize s = graphics_text_layout_get_content_size(
-        buf, font, measure, GTextOverflowModeFill, GTextAlignmentCenter);
-    if (s.w > best.w) { best = s; wide = days[i]; }
-  }
-  for (int d = 1; d <= 31; d++) {
-    snprintf(buf, sizeof buf, "%s %02d", wide, d);
-    GSize s = graphics_text_layout_get_content_size(
-        buf, font, measure, GTextOverflowModeFill, GTextAlignmentCenter);
+        days[i], font, measure, GTextOverflowModeFill, GTextAlignmentCenter);
     if (s.w > best.w) best = s;
   }
   return best;
 }
 
-Layout layout_compute(GRect bounds, GFont date_font, GFont slot_font) {
+Layout layout_compute(GRect bounds, GFont date_font, GFont slot_font, int16_t cell) {
   Layout lo;
   lo.bounds = bounds;
+  lo.cell = cell;
 
   // The dial is the full screen width and flush to the top on a rectangle, so
   // its centre is half a *width* down rather than half a height. What is left
@@ -342,17 +335,23 @@ Layout layout_compute(GRect bounds, GFont date_font, GFont slot_font) {
   if (lo.hub_r < 2) lo.hub_r = 2;
 
   // Representative strings, never the live ones: no row may change size as the
-  // day, the countdown or the distance moves. The date is the widest of the real
-  // ones, searched rather than named: "MON 22" was named, and in Gothic W is wider
-  // than M, so every Wednesday truncated to "WED ..." on emery. "0:00" is the
-  // widest a countdown gets; one digit of hours, not two, is what fits it into a
-  // disc this size. "000 KM" is the widest a distance
+  // day, the countdown or the distance moves. The weekday is the widest of the real
+  // ones, searched rather than named: "MON" was named, and in Gothic W is wider than
+  // M, so every Wednesday truncated to "WED ..." on emery. "0:00" is the countdown at
+  // every value, the drawn digits being tabular; one digit of hours, not two, is what
+  // fits it into a disc this size. "000 KM" is the widest a distance
   // gets: three digits is what fmt_distance() switches to above ten units, and
   // KM is wider than MI, so the fraction case is never the binding one.
   GRect measure = GRect(0, 0, bounds.size.w, bounds.size.h);
-  GSize ds = widest_date(date_font, measure);
+  GSize ds = widest_wday(date_font, measure);
+  lo.date_gap = ds.h / 4;
+  ds.w += lo.date_gap + digits_size("00", cell).w;
+  // The countdown's digits are drawn, and its row is sized from them: the ink, and
+  // COUNT_PAD above and below it, the same margin the running box keeps either side.
+  GSize dg = digits_size("0:00", cell);
+  // Still the slot font's, for the rows that are still set in it.
   GSize cs = graphics_text_layout_get_content_size(
-      "0:00", slot_font, measure, GTextOverflowModeFill, GTextAlignmentCenter);
+      "00", slot_font, measure, GTextOverflowModeFill, GTextAlignmentCenter);
   GSize ns = graphics_text_layout_get_content_size(
       "000 KM", slot_font, measure, GTextOverflowModeFill, GTextAlignmentCenter);
   GSize ws = graphics_text_layout_get_content_size(
@@ -366,7 +365,7 @@ Layout layout_compute(GRect bounds, GFont date_font, GFont slot_font) {
   // would move every row in it at the one moment the reader is watching one. The
   // row inverting says the same thing on the line itself, so the reservation is
   // gone and the disc is a bar's height smaller on every platform.
-  int16_t count_h = ROW_H(cs.h);
+  int16_t count_h = dg.h + 2 * COUNT_PAD(dg.h);
 
   // What each row needs in the one-row [glyph] number form slot_layout() draws.
   // The glyph is 85% of its row, and the gap after it is SLOT_GAP. 85% is
@@ -374,9 +373,9 @@ Layout layout_compute(GRect bounds, GFont date_font, GFont slot_font) {
   // before there is anything to lay out in it; the gap is shared through
   // geometry.h. The countdown also carries its filled box's margin on both sides,
   // reserved whether the box draws or not.
-  int16_t cg = cs.h * 85 / 100;
+  int16_t cg = count_h * 85 / 100;
   int16_t bg = row_h * 85 / 100;
-  int16_t count_w = COUNT_PAD(cs.h) + cg + SLOT_GAP(cg) + cs.w + COUNT_PAD(cs.h);
+  int16_t count_w = COUNT_PAD(dg.h) + cg + SLOT_GAP(cg) + dg.w + COUNT_PAD(dg.h);
   int16_t nav_w = bg + SLOT_GAP(bg) + ns.w;
   int16_t warn_w = bg + SLOT_GAP(bg) + ws.w;
 

@@ -126,13 +126,17 @@ typedef struct {
   // hour of its own.
   int16_t plate_r;
   GRect   date_box;    // the weekday and the day of the month, one line
+  int16_t date_gap;    // between the weekday and the day number, a Gothic space's worth
+  int16_t cell;        // the drawn numerals' cell — see digits.h
   GRect   count_box;   // the countdown, signed; a plain row of the disc
   GRect   nav_box;
   GRect   warn_box;    // the same rect as nav_box where band_inset: one slot, not two
   bool    band_inset;  // true where the notification reading is a row of the disc
 } Layout;
 
-Layout layout_compute(GRect bounds, GFont date_font, GFont slot_font);
+// cell is the drawn numerals' lattice cell, DIGIT_CELL; the date's weekday and every
+// row's words stay in the two fonts.
+Layout layout_compute(GRect bounds, GFont date_font, GFont slot_font, int16_t cell);
 
 // ---------------------------------------------------------------------------
 // Angles

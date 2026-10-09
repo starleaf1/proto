@@ -10,6 +10,7 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
 import link.dendritik.proto.pipe.battery.PhoneBattery
+import link.dendritik.proto.pipe.calendar.CalendarPrefs
 import link.dendritik.proto.pipe.calendar.CalendarSource
 import link.dendritik.proto.pipe.calendar.CalendarWatcher
 import link.dendritik.proto.pipe.nuron.NuronHolder
@@ -55,7 +56,8 @@ fun backoffDelayMs(baseMs: Long, misses: Int, capMs: Long): Long {
  * of these and call [start], then [stop].
  *
  * Four change signals feed one action — re-scan and reconcile:
- *  - the calendar changed (an edit here, or a sync landing from the server)
+ *  - the calendar changed (an edit here, or a sync landing from the server), or the
+ *    user changed which calendars are sent, which is the same kind of news
  *  - the watch reconnected, which sends even if the scan looks unchanged
  *  - time passed, so the six-hour window slid; nothing "changed" but the answer did
  *  - the user pressed re-sync, which is the only one of the four that is not a change
@@ -73,6 +75,7 @@ class PipeEngine(private val context: Context) {
     private val calendar = CalendarSource(context)
     private val battery = PhoneBattery(context) { sender.submitBattery(it) }
     private val watcher = CalendarWatcher(context) { reconcile(force = false) }
+    private val calendarPrefs = CalendarPrefs(context)
 
     // The second source. It contributes the same EventFacts as the calendar and
     // is merged into one table by MergePolicy, because the watch has one table
@@ -105,6 +108,7 @@ class PipeEngine(private val context: Context) {
         sender.onWatchConnected = { reconcile(force = true) }
         sender.start()
         watcher.start()
+        calendarPrefs.watch { reconcile(force = false) }
         nuronWatcher.start()
         battery.start()
         startTick()
@@ -124,6 +128,7 @@ class PipeEngine(private val context: Context) {
         receiver?.let { runCatching { context.unregisterReceiver(it) } }
         receiver = null
         battery.stop()
+        calendarPrefs.unwatch()
         watcher.stop()
         nuronWatcher.stop()
         sender.stop()
@@ -139,7 +144,7 @@ class PipeEngine(private val context: Context) {
      */
     private fun reconcile(force: Boolean): Boolean {
         val now = System.currentTimeMillis()
-        val calendarEvents = calendar.query(now)
+        val calendarEvents = calendar.query(now, calendarPrefs.chosen())
         // The holder is what keeps a transient provider fault from wiping every
         // Nuron marker, and what stops a permanently broken one from pinning
         // stale markers for ever. See NuronHolder.

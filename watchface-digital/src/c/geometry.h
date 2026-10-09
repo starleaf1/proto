@@ -136,8 +136,9 @@ typedef struct {
 } Layout;
 
 // tick_font is here for one number: the width of "00" in it is the label lane, and
-// the lane moves the track, which moves everything else.
-Layout layout_compute(GRect bounds, GFont num_font, GFont date_font,
+// the lane moves the track, which moves everything else. num_cell is the clock's
+// lattice cell — see digits.h; the clock is drawn, not set in a font.
+Layout layout_compute(GRect bounds, int16_t num_cell, GFont date_font,
                       GFont slot_font, GFont tick_font);
 
 // A point on the track, and the ray angle there.
@@ -216,6 +217,10 @@ void fill_track_band(GContext *ctx, const Layout *lo, int32_t u0, int32_t u1,
 // Follows ROW_ALIGN, because a plate that stayed centred while the text moved left
 // would knock out the wrong pixels and leave a marker crossing the digits.
 GRect text_plate(GRect box, GFont font, const char *text);
+
+// The same plate for ink `w` px wide at the left of `box` — text_plate() measures the
+// text and comes here. The clock calls it directly, its width being digits_size()'s.
+GRect ink_plate(GRect box, int16_t w);
 
 // Fill `r` with the background colour. Invisible over the background itself, so
 // the only thing it does is cut away whatever a marker or band had already drawn

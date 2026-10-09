@@ -1,5 +1,6 @@
 #include <pebble.h>
 #include "dial.h"
+#include "digits.h"
 #include "events.h"
 #include "geometry.h"
 #include "slots.h"
@@ -45,15 +46,17 @@ static GFont   s_slot_font;
 static struct tm s_tm;
 static time_t    s_now = 0;
 
-static char s_date_buf[16];  // "MON 22"
+static char s_wday_buf[8];   // "MON", set in FONT_DATE
+static char s_mday_buf[4];   // "22", drawn — see digits.h
 
 static void update_buffers(void) {
-  // "%a %d", not "%a %d %b". The month is the one part of a date that a reader
-  // already knows, and the disc's top row is sized from this string.
-  strftime(s_date_buf, sizeof s_date_buf, "%a %d", &s_tm);
-  for (char *p = s_date_buf; *p; p++) {   // the font subset has no lowercase
+  // The weekday and the day, not the month. The month is the one part of a date that
+  // a reader already knows, and the disc's top row is sized from these two.
+  strftime(s_wday_buf, sizeof s_wday_buf, "%a", &s_tm);
+  for (char *p = s_wday_buf; *p; p++) {   // the font subset has no lowercase
     if (*p >= 'a' && *p <= 'z') *p -= 32;
   }
+  strftime(s_mday_buf, sizeof s_mday_buf, "%d", &s_tm);
 }
 
 static void mark_dirty(void) {
@@ -66,7 +69,7 @@ static void mark_dirty(void) {
 
 static void root_update_proc(Layer *layer, GContext *ctx) {
   GRect b = layer_get_bounds(layer);
-  Layout lo = layout_compute(b, s_date_font, s_slot_font);
+  Layout lo = layout_compute(b, s_date_font, s_slot_font, DIGIT_CELL);
 
   graphics_context_set_antialiased(ctx, true);
   graphics_context_set_fill_color(ctx, COL_BG);
@@ -83,19 +86,24 @@ static void root_update_proc(Layer *layer, GContext *ctx) {
   // loses nothing and the text is legible at every minute of the day.
   draw_disc(ctx, lo.center, lo.plate_r);
 
-  // The box is the reserved row; the text is drawn at its full measured height
+  // The box is the reserved row; the weekday is drawn at its full measured height
   // and lifted into it, which is what puts the ink where the row says it is. See
-  // ROW_H in geometry.h.
-  GSize dsz = graphics_text_layout_get_content_size(
-      s_date_buf, s_date_font, b, GTextOverflowModeFill, GTextAlignmentCenter);
+  // ROW_H in geometry.h. The day number is drawn beside it, standing on the weekday's
+  // baseline — which Gothic puts on its box's last row — and the pair is centred
+  // as one.
+  GSize wsz = graphics_text_layout_get_content_size(
+      s_wday_buf, s_date_font, b, GTextOverflowModeFill, GTextAlignmentLeft);
+  GSize nsz = digits_size(s_mday_buf, lo.cell);
+  int16_t dw = wsz.w + lo.date_gap + nsz.w;
+  int16_t dx = lo.date_box.origin.x + (lo.date_box.size.w - dw) / 2;
+  int16_t dy = lo.date_box.origin.y - ROW_LIFT(wsz.h);
   graphics_context_set_text_color(ctx, COL_INK);
-  graphics_draw_text(ctx, s_date_buf, s_date_font,
-                     GRect(lo.date_box.origin.x,
-                           lo.date_box.origin.y - ROW_LIFT(dsz.h),
-                           lo.date_box.size.w, dsz.h),
-                     GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+  graphics_draw_text(ctx, s_wday_buf, s_date_font, GRect(dx, dy, wsz.w + 4, wsz.h),
+                     GTextOverflowModeFill, GTextAlignmentLeft, NULL);
+  digits_draw(ctx, s_mday_buf, GPoint(dx + wsz.w + lo.date_gap, dy + wsz.h - nsz.h),
+              lo.cell, COL_INK);
 
-  slots_draw_count(ctx, &lo, s_slot_font, s_now);
+  slots_draw_count(ctx, &lo, s_now);
   slots_draw_nav(ctx, &lo, s_slot_font);
   slots_draw_warn(ctx, &lo, s_slot_font);
 }

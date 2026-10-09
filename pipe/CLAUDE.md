@@ -35,11 +35,14 @@ link.dendritik.proto.pipe
 │                        and Android 15's six-hour cap on it
 ├── PipeHost.kt             chooseHost + the CompanionDeviceManager calls
 ├── BootReceiver.kt         re-arms whichever host this device uses
-├── MainActivity.kt         permission grants, watch pairing, re-sync + diagnostics
+├── MainActivity.kt         permission grants, watch pairing, calendar choice,
+│                        re-sync + diagnostics
 ├── PipeStatus.kt           observable, diagnostics only
 ├── calendar/
 │   ├── CalendarSource.kt   ContentResolver over CalendarContract.Instances
 │   ├── CalendarWatcher.kt  ContentObserver + ACTION_PROVIDER_CHANGED
+│   ├── CalendarChoice.kt   pure: which calendars are sent, and what a choice is keyed by
+│   ├── CalendarPrefs.kt    where the choice is kept; the engine listens to it
 │   └── EventFacts.kt       pure data — the framework boundary
 ├── battery/PhoneBattery.kt ACTION_BATTERY_CHANGED
 ├── pebble/
@@ -208,6 +211,21 @@ unpacker could share the same mistake as the packer and both would agree.
   watch removes entries by, so it must be stable across process restarts, which
   `hashCode`'s contract does not promise. It hashes the start time in *minutes* so that
   sub-minute jitter in a provider's reported start cannot re-key an entry.
+- **A calendar added after the user has changed the choice is not sent until it is
+  ticked.** Before the first change there is no stored choice and every calendar is
+  sent, which is how an update leaves the wrist exactly as it was. After it, the choice
+  is an allowlist, because this setting exists to keep calendars off a watch anyone
+  nearby can read, and a new account turning up there unasked is the leak. An unticked
+  calendar is at least visible on the settings screen; a leaked one is not visible
+  anywhere.
+- **The choice is keyed by account and `_SYNC_ID`, not by `_ID`.** Re-adding an account
+  or clearing Calendar Storage re-creates every calendar under a fresh row id, and an
+  allowlist of row ids would then drop them all from the watch, which looks like an
+  empty afternoon. Only a local calendar, which has no sync id, falls back to its row id.
+  Row ids are re-resolved from the keys on every scan for the same reason.
+- **The filter is in the instance query, not applied to its result.** An unticked
+  calendar's entries are never read, so there is nothing of them to leak by mistake
+  further down.
 - **`STATUS IS NULL OR STATUS != STATUS_CANCELED`**, not a bare inequality. `STATUS` is
   nullable and `NULL != 2` is `NULL` in SQL — which is not true — so the bare form
   silently drops every entry whose status is unset, which is most of them.
