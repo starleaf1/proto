@@ -2,9 +2,12 @@
 
 #define SLOT_NEAR_S  (30 * 60)
 
-// The far tier reaches exactly as far as the ring does, deliberately: the
-// countdown should never name something the reader cannot also see a marker for.
-#define SLOT_FAR_S   RING_AHEAD_S
+// The far tier stops at five hours, well short of the ring's eleven. It must never
+// reach *past* the ring — the countdown should never name something the reader
+// cannot also see a marker for — and on this face it must not follow the ring all
+// the way either: the countdown carries one digit of hours and clamps at 9:59, so
+// an entry ten hours out would read as one nine hours out.
+#define SLOT_FAR_S   (5 * 60 * 60)
 
 static Event s_events[EVENTS_MAX];
 
@@ -92,7 +95,7 @@ void events_save(void) {
   }
 
   // Written even when nothing is used, because "the last thing the companion said
-  // was that the next six hours are empty" is a reading too, and a stale table
+  // was that the window is empty" is a reading too, and a stale table
   // left in flash would contradict it.
   persist_write_data(EVENTS_PERSIST_KEY, &st, sizeof st);
 }

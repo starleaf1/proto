@@ -282,7 +282,7 @@ private fun StatusScreen(
     ) {
         Text("proto", style = MaterialTheme.typography.headlineMedium)
         Text(
-            "Sends your next six hours to the watch.",
+            "Sends your next eleven hours to the watch.",
             style = MaterialTheme.typography.bodyMedium,
         )
 

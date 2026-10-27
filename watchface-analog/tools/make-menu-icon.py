@@ -23,7 +23,7 @@ Two files, because the selector runs an icon in a different mode per platform
 25x25 is the SDK's limit; anything larger is rejected outright.
 
 The dial, two hands told apart by width as they are on the face, and one band
-on the rim. The face's rail spans half the ring and carries the band on it,
+on the rim. The face's rail runs the ring and carries the band on it,
 and at 25 px across a 2 px rail under a 3 px band is one shape with it - a
 quarter of the ring's depth is not a difference this many pixels can hold. So
 the icon states the band alone: the rim is where time is marked. The band sits

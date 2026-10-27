@@ -19,7 +19,7 @@ import androidx.core.content.ContextCompat
  * an entry created on a laptop shows up.
  *
  * Neither fires for the third case: nothing changed, but time passed and the
- * six-hour window slid forward. That one is the service's periodic re-scan.
+ * window slid forward. That one is the service's periodic re-scan.
  */
 class CalendarWatcher(
     private val context: Context,

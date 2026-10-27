@@ -153,9 +153,9 @@ static void demo_seed(time_t now) {
   // The analog face's horizon cases, kept so the two sets stay one set. Every
   // display here reaches three hours ahead, so all three are past this face's end;
   // they check that nothing past the horizon draws.
-  events_upsert(9, now + 270 * 60, 90, EV_APPOINTMENT);  // clips at the analog face's end
-  events_upsert(10, now + 295 * 60, 0, EV_TASK);         // just inside the analog horizon
-  events_upsert(11, now + 355 * 60, 0, EV_TASK);         // past it: must not draw
+  events_upsert(9, now + 630 * 60, 90, EV_APPOINTMENT);  // clips at the analog face's end
+  events_upsert(10, now + 655 * 60, 0, EV_TASK);         // just inside the analog horizon
+  events_upsert(11, now + 690 * 60, 0, EV_TASK);         // past it: must not draw
 }
 #endif
 

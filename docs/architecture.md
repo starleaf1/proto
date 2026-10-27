@@ -13,7 +13,7 @@ companion that feeds them both:
 │ reads the calendar and the   │───────────────┤
 │ phone's battery, and         │  Nav*, Phone  │  ┌──────────────────────────────────┐
 │ addresses every message to   │  Battery      └─►│ watchface-analog/                │
-│ both UUIDs                   │                  │ a six-hour timeline round the    │
+│ both UUIDs                   │                  │ a twelve-hour timeline round the │
 └──────────────────────────────┘  on change,      │ rim of an analog dial, with      │
                                   plus a          │ the date and the countdown       │
                                   liveness beat   │ at the centre                    │
@@ -67,12 +67,14 @@ Shared by both:
 
 `watchface-analog/` — **the calendar is fixed and now moves:**
 
-- **The ring is a six-hour timeline round the rim** — one hour behind, five ahead — with
-  each entry at the clock angle of its own time, so a three o'clock meeting is at the 3.
-  A rail spans the window and stops at an end cap; past it, the ring is not empty, it is
-  not being shown. With nothing inside the window the rail goes too, leaving a plain
+- **The ring is a twelve-hour timeline round the rim** — one hour behind, eleven ahead —
+  with each entry at the clock angle of its own time, so a three o'clock meeting is at
+  the 3. The window is a full turn, so the rail closes on itself and its two end caps
+  meet in one wall thirty degrees behind the hour hand: the ring's one seam, with the
+  last of the lookahead on one side and the overdue linger on the other. With nothing
+  inside the window the rail goes too, leaving a plain
   analog clock rather than an empty scale.
-- **There is no now mark.** Six hours over half a turn is thirty degrees to the hour,
+- **There is no now mark.** Twelve hours over one turn is thirty degrees to the hour,
   which is the hour hand's own rate, so the hand points at the present position on the
   timeline by construction. It ends level with the ticks' outer end and never enters the
   ring: the ticks are the scale it is read against, and the markers have one lane the
@@ -189,28 +191,28 @@ One window, one layer, one update proc, split across the same shape of module se
 `events`, `wire` and `wbatt` are the digital face's files, copied. They carry no
 rendering knowledge, and they only *read* the window constants rather than defining
 them — which is what lets the two windows differ without the copies drifting. It is
-1 h and 5 h here; there it is 1 h and 3 h on the rectangles and 1.5 h and 3.5 h on
+1 h and 11 h here; there it is 1 h and 3 h on the rectangles and 1.5 h and 3.5 h on
 `gabbro`.
 
 **Everything is polar, and there is one angular scale.** `angle_of_time()` maps a
 wall-clock instant to a dial angle — `((minutes % 720) * TRIG_MAX_ANGLE) / 720`, into
 trig units with no intermediate degrees, because a whole degree is two minutes of the
-ring and 2.2 px of `gabbro`'s rim. Six hours is 360 minutes over half a turn, so the ring
+ring and 2.2 px of `gabbro`'s rim. Twelve hours is 720 minutes over one turn, so the ring
 runs at exactly the hour hand's rate and the hand needs no explanation.
 
 No cosine correction anywhere: every marker is square to a true circle on all three
 platforms, so a depth in pixels is already perpendicular to the boundary. The old dial
 that preceded the digital face did need one — that was a rectangle's angled ray.
 
-**Bands** use the same representation as the strip's: `uint8_t coverage[361]`, one byte
+**Bands** use the same representation as the strip's: `uint8_t coverage[721]`, one byte
 per minute of the window. Per *degree* would be the tempting symmetry and is the wrong
 way round — two minutes share a degree, and `gabbro` would lose a pixel of placement.
 
-**Every angle is a base plus a span, never a fresh absolute.** The window is half a turn
-and rides with the hour hand, so it straddles twelve o'clock for six hours out of every
-twelve. Reducing both ends mod a turn independently puts the end behind the start, and
-`graphics_fill_radial` draws nothing when the start is the larger — a third of the day
-would render blank. `fill_ring_band()` normalises the start, carries the span, and splits
+**Every angle is a base plus a span, never a fresh absolute.** The window is a full turn
+and rides with the hour hand, so the rail straddles twelve o'clock at every hour of the
+day and a band does whenever it covers twelve. Reducing both ends mod a turn
+independently puts the end behind the start, and `graphics_fill_radial` draws nothing
+when the start is the larger — the rail would never draw at all. `fill_ring_band()` normalises the start, carries the span, and splits
 at the boundary.
 
 **The hands** are tapered quads with a background halo *and a stroked spine*, told apart
@@ -303,7 +305,7 @@ the app says so.
 ## Data flow
 
 1. Something happens: the calendar changed, the watch reconnected, ten minutes passed
-   and the six-hour window slid forward, or the user pressed **Re-sync now** on the
+   and the window slid forward, or the user pressed **Re-sync now** on the
    diagnostics screen. All four land on one method, `PipeEngine.reconcile`.
 
    The fourth is the only one that is not a change, and the only one that comes from
@@ -315,15 +317,15 @@ the app says so.
    up knowing nothing. It sends the same flush the tick sends and deliberately leaves the
    alarm alone, because re-arming on a press would slide the declared cadence a full
    period.
-2. `CalendarSource` scans `[now − 3 h, now + 6 h]`, excluding whole-day entries — they
+2. `CalendarSource` scans `[now − 3 h, now + 11 h]`, excluding whole-day entries — they
    have no position on a timeline and no duration that would fit one — anything
    cancelled, and every calendar the user has not chosen to send. That last filter is
    in the query itself, so an unticked calendar's entries are never read. Duration comes from `END - BEGIN`; a zero-length instance is a reminder.
 
    The phone's window deliberately covers every face's — `[now − 1 h, now + 3 h]` on
    the digital one's rectangles, `[now − 3 h, now + 3 h]` on its round display, and
-   `[now − 1 h, now + 5 h]` on the analog face. It reaches back as far as the deepest of
-   them and no further: a flush replaces the watch's table, so anything the scan misses
+   `[now − 1 h, now + 11 h]` on the analog face. It reaches forward as far as the
+   furthest-reaching of them and back as far as the deepest, and no further: a flush replaces the watch's table, so anything the scan misses
    is dropped from a strip that could still show it. Entries past a face's horizon sit in its table undrawn and
    come into view as the window slides, which costs one message instead of one per
    quarter hour, and one scan serves all of them.

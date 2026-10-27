@@ -125,7 +125,7 @@ unpacker could share the same mistake as the packer and both would agree.
   wake-ups an hour turned into one. **The watch is still told the base period**, because
   a backed-off one could only be declared by a message that arrived and an arriving
   message is what ends the backoff — so while the retries fail the watch is meant to
-  raise `NO LINK`, and its three-period grace is where it does.
+  raise `DISCONNECTED`, and its three-period grace is where it does.
 - **Two hosts, and `chooseHost` is the only thing that picks between them.** It is pure,
   and unit-tested, because the wrong answer is invisible: choose the companion host where
   the platform will not bind it and the app simply stops sending, with no notification

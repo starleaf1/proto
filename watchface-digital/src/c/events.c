@@ -92,7 +92,7 @@ void events_save(void) {
   }
 
   // Written even when nothing is used, because "the last thing the companion said
-  // was that the next six hours are empty" is a reading too, and a stale table
+  // was that the window is empty" is a reading too, and a stale table
   // left in flash would contradict it.
   persist_write_data(EVENTS_PERSIST_KEY, &st, sizeof st);
 }

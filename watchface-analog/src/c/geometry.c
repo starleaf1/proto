@@ -105,9 +105,10 @@ void fill_ring_band(GContext *ctx, const Layout *lo, int32_t a0, int32_t a1,
   if (a1 <= TRIG_MAX_ANGLE) {
     fill_sector(ctx, lo->center, r_outer, depth, a0, a1);
   } else {
-    // Split at twelve. The window is half a turn and rides with the hour hand,
-    // so it straddles the boundary for six hours out of every twelve; this is
-    // the ordinary case, not the edge one.
+    // Split at twelve. The window is a full turn and rides with the hour hand,
+    // so the rail straddles the boundary at every hour of the day, and a band
+    // does whenever it covers twelve o'clock; this is the ordinary case, not
+    // the edge one.
     fill_sector(ctx, lo->center, r_outer, depth, a0, TRIG_MAX_ANGLE);
     fill_sector(ctx, lo->center, r_outer, depth, 0, a1 - TRIG_MAX_ANGLE);
   }

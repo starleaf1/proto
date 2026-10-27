@@ -16,18 +16,20 @@
 // track and no second mapping to keep in step.
 // ---------------------------------------------------------------------------
 
-// The visible window: 1 h behind and 5 h ahead. Six hours on a twelve-hour dial
-// is exactly half a turn, 30 degrees to the hour and half a degree to the
+// The visible window: 1 h behind and 11 h ahead. Twelve hours on a twelve-hour
+// dial is exactly one turn, 30 degrees to the hour and half a degree to the
 // minute — the hour hand's own rate, which is the whole reason the markers can
 // be anchored to the dial instead of carrying a scale of their own.
 //
-// Six is also what fits without wrapping. Twelve hours is a full revolution, so
-// anything past that would put two different times on one angle; at six there
-// is no am/pm ambiguity anywhere inside what is drawn.
+// Twelve is also the most that fits without wrapping: anything past it would put
+// two different times on one angle. At exactly twelve the two ends of the window
+// meet, at a single end cap thirty degrees behind the hour hand, and that cap is
+// the one place where adjacent angles are eleven hours apart — the last of the
+// lookahead on one side of it, the overdue linger on the other.
 #define RING_BACK_S    (1 * 60 * 60)
-#define RING_AHEAD_S   (5 * 60 * 60)
+#define RING_AHEAD_S   (11 * 60 * 60)
 #define RING_SPAN_S    (RING_BACK_S + RING_AHEAD_S)
-#define RING_SPAN_MIN  (RING_SPAN_S / 60)   // 360 — one coverage byte each
+#define RING_SPAN_MIN  (RING_SPAN_S / 60)   // 720 — one coverage byte each
 
 // A full turn of the dial, in minutes. Half a day, because the hands read a
 // twelve-hour clock and the ring reads the same dial the hands do.
@@ -196,10 +198,10 @@ int16_t stroke_px(int16_t w);
 // graphics_fill_radial draws nothing at all if the start is the larger, which
 // is a blank ring rather than an error.
 //
-// A span that crosses twelve o'clock is drawn as two fills. The window is half
-// a turn and sits wherever the hour hand is, so it straddles the boundary for
-// six hours out of every twelve; relying on the SDK to normalise an angle past
-// a full turn would make a third of the day's renders a guess.
+// A span that crosses twelve o'clock is drawn as two fills. The window is a
+// full turn and sits wherever the hour hand is, so the rail straddles the
+// boundary on every render; relying on the SDK to normalise an angle past a
+// full turn would make every one of them a guess.
 void fill_ring_band(GContext *ctx, const Layout *lo, int32_t a0, int32_t a1,
                     int16_t r_outer, int16_t depth, GColor col);
 

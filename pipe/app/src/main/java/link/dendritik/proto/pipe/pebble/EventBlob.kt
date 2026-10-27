@@ -37,7 +37,7 @@ object EventBlob {
 
     /**
      * Splits into transmittable messages. An empty list still yields one empty
-     * message: that is how a flush says "the next six hours are clear", and
+     * message: that is how a flush says "the window is clear", and
      * sending nothing at all would leave the watch showing what it had.
      */
     fun chunk(records: List<Record>): List<ByteArray> =

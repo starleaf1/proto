@@ -144,7 +144,7 @@ static bool handle_calendar(DictionaryIterator *iter) {
 
   int32_t flags = f ? f->value->int32 : 0;
   // Clear before the payload check, not after: a flush carrying no records is
-  // how the companion says the next six hours are empty.
+  // how the companion says the window is empty.
   if (flags & CAL_FLUSH) events_clear();
 
   if (!b || b->type != TUPLE_BYTE_ARRAY || b->length < CAL_HEADER) {

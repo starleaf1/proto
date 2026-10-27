@@ -93,8 +93,9 @@ static const ManeuverPath MANEUVERS[] = {
 //
 // Fourteen now, measured rather than assumed: at 14 px of glyph with a 3 px stroke
 // flint's phone silhouette keeps four pixels of interior and still reads as an outline.
-// The battery and the calendar never reach this floor — they are mostly interior and
-// drawn at a hairline on purpose.
+// (The phone has since become a filled shape — see glyph_phone — and only its slash
+// still comes through here.) The battery and the calendar never reach this floor —
+// they are mostly interior and drawn at a hairline on purpose.
 static int16_t glyph_stroke(int16_t side, int16_t div) {
   int16_t w = stroke_px(side / div);
   if (w < 3 && side >= 14) w = 3;
@@ -166,19 +167,36 @@ static void glyph_maneuver(GContext *ctx, GRect box, int man, GColor ink) {
   draw_tri(ctx, tip, b1, b2, ink, false);
 }
 
-// A phone silhouette. Also the "whose battery" cue: this outline against the
+// A phone silhouette. Also the "whose battery" cue: this shape against the
 // battery pictogram below is what lets both alerts drop the word "phone".
+//
+// Material's smartphone mark, not an outline: a solid body with the screen cut out
+// of it, the bezel above and below the screen deeper than the one beside it. An
+// outline of even weight is a zero, and this glyph stands immediately left of a
+// number — the low-battery reading came off emery as "028%". The deep top and bottom
+// are the one feature a phone has that a digit does not.
+//
+// Filled rects rather than a stroke, so the bezels are not held to stroke_px()'s odd
+// widths: flint gets 2 px beside the screen and 3 above and below, around a 4x6
+// screen, where a 3 px stroke left it a 2x6 slot.
 static void glyph_phone(GContext *ctx, GRect box, bool slashed, GColor ink) {
   GPoint c = grect_center_point(&box);
   int16_t side = box.size.w < box.size.h ? box.size.w : box.size.h;
-  int16_t w = side * 58 / 100;
+  int16_t w = side * 52 / 100;
   int16_t h = side * 92 / 100;
   int16_t sw = glyph_stroke(side, 8);
 
+  int16_t bez_x = 2;
+  int16_t bez_top = side / 6;
+  if (bez_top < bez_x) bez_top = bez_x;
+  int16_t bez_bot = bez_top + 2;
+
   GRect body = GRect(c.x - w / 2, c.y - h / 2, w, h);
-  graphics_context_set_stroke_color(ctx, ink);
-  graphics_context_set_stroke_width(ctx, sw);
-  graphics_draw_round_rect(ctx, body, side / 8);
+  graphics_context_set_fill_color(ctx, ink);
+  graphics_fill_rect(ctx, body, side / 8, GCornersAll);
+  graphics_context_set_fill_color(ctx, COL_BG);
+  graphics_fill_rect(ctx, GRect(body.origin.x + bez_x, body.origin.y + bez_top,
+                                w - 2 * bez_x, h - bez_top - bez_bot), 0, GCornerNone);
 
   if (slashed) {
     GPoint from = GPoint(body.origin.x - sw, body.origin.y + body.size.h + sw);
@@ -389,7 +407,7 @@ void slots_draw_count(GContext *ctx, const Layout *lo, time_t now) {
 
   // "%d:%02d", not the digital face's "%02d:%02d". One digit of hours rather than
   // two, which is what keeps the number narrow enough for flint's plate — and
-  // nothing is lost, because the far tier reaches five hours and all-day events
+  // nothing is lost, because the far tier stops at five hours and all-day events
   // never cross the wire. Clamped at 9:59 so it can never grow.
   int32_t mins = p.seconds / 60;
   if (mins > 9 * 60 + 59) mins = 9 * 60 + 59;
@@ -471,7 +489,7 @@ void slots_draw_nav(GContext *ctx, const Layout *lo, GFont font) {
 //
 // Not on the round display, and that is a width argument rather than a preference:
 // there the pair are rows of the disc, layout_compute sizes the disc from the widest
-// string each row can hold, and a seven-character label would grow it over the dial
+// string each row can hold, and a twelve-character label would grow it over the dial
 // permanently to state something that is true for minutes at a time. The glyph carries
 // that case alone there, as it did everywhere before.
 void slots_draw_warn(GContext *ctx, const Layout *lo, GFont font) {
@@ -485,7 +503,7 @@ void slots_draw_warn(GContext *ctx, const Layout *lo, GFont font) {
   if (!wire_companion_alive()) {
     which = T_DOWN;
     ink = COL_ALERT;
-    if (!lo->band_inset) snprintf(text, sizeof text, "NO LINK");
+    if (!lo->band_inset) snprintf(text, sizeof text, "DISCONNECTED");
   } else {
     int pb = wire_phone_battery();
     int wh = wbatt_hours();

@@ -15,7 +15,7 @@ marker sitting on top of a band, and entries at and past the horizon. **Keep it 
 with `demo_seed()` in `src/c/proto.c`**; the two are meant to show the same face.
 
 The last three entries are the sibling face's horizon cases, verbatim — watchface-analog/
-runs five hours ahead, and the two scripts are meant to differ only in prose. This face
+runs eleven hours ahead, and the two scripts are meant to differ only in prose. This face
 reaches three hours ahead (three and a half on gabbro), so here all three are simply past the end
 and must not draw.
 
@@ -77,17 +77,17 @@ DEFAULT_PLATFORM = "flint"
 
 # id, start offset in minutes from now, duration in minutes, kind, why it is here.
 DEMO = [
-    (1, -20, 90, EV_APPOINTMENT, "running: deep band across the pointer + count-up"),
+    (1, -20, 90, EV_APPOINTMENT, "running: the hour hand is inside the band"),
     (2, 100, 40, EV_APPOINTMENT, "overlaps 3 -- the two must flatten to one band"),
     (3, 120, 45, EV_APPOINTMENT, "overlaps 2"),
-    (4, 40, 45, EV_APPOINTMENT, "ordinary upcoming: a third of the notch zone"),
-    (5, -40, 0, EV_TASK, "overdue: solid wedge above the pointer"),
+    (4, 40, 45, EV_APPOINTMENT, "ordinary upcoming: half the ring's depth"),
+    (5, -40, 0, EV_TASK, "overdue: behind the hour hand, late colour"),
     (6, 160, 0, EV_TASK, "4 min from 7 -- too close to draw apart"),
-    (7, 164, 0, EV_TASK, "-> one deeper marker"),
+    (7, 164, 0, EV_TASK, "-> one deeper, blunter wedge"),
     (8, 110, 0, EV_TASK, "sits on top of a band"),
-    (9, 270, 90, EV_APPOINTMENT, "past the 3 h horizon (the analog face's end-clip case)"),
-    (10, 295, 0, EV_TASK, "past the horizon (just inside the analog face's)"),
-    (11, 355, 0, EV_TASK, "past it -- must not draw"),
+    (9, 630, 90, EV_APPOINTMENT, "runs past the 11 h horizon -- clips at the end cap"),
+    (10, 655, 0, EV_TASK, "just inside the horizon"),
+    (11, 690, 0, EV_TASK, "past it -- must not draw"),
 ]
 
 # Nuron quests, as `pipe` now sends them: the same records, but with bit 31 of the

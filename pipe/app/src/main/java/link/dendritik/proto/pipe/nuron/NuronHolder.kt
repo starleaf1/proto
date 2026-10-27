@@ -23,7 +23,7 @@ import link.dendritik.proto.pipe.calendar.EventFacts
  * judgement the watch's own liveness watchdog makes ("it missed one and the
  * retry missed too"), and on the slow 600 s tier it is half an hour of grace —
  * long enough to ride out an app update, short enough that stale markers age
- * out well inside the six-hour window they live in.
+ * out well inside the eleven-hour window they live in.
  *
  * Pure and single-threaded: `PipeEngine` reconciles on one thread, and making
  * this stateful-but-pure is what lets the decay be unit-tested without a clock.

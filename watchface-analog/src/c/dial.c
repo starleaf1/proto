@@ -4,12 +4,13 @@
 #include <string.h>
 
 // ---------------------------------------------------------------------------
-// Six hours of timeline, anchored to the dial.
+// Twelve hours of timeline, anchored to the dial.
 //
 // A marker sits at the clock angle of its own time: a three o'clock meeting is
-// at the 3. The window is 1 h behind and 5 h ahead, which on a twelve-hour dial
-// is the half-turn running from 30 degrees behind the hour hand to 150 ahead of
-// it — thirty degrees to the hour, which is the hour hand's own rate.
+// at the 3. The window is 1 h behind and 11 h ahead, which on a twelve-hour dial
+// is the whole turn, from 30 degrees behind the hour hand round to the same 30
+// degrees behind it — thirty degrees to the hour, which is the hour hand's own
+// rate.
 //
 // That is the whole design. Because the ring and the hands share one angular
 // scale, the hand needs no now mark to explain it and the ring needs no
@@ -30,7 +31,7 @@
 // is both the finer unit and the one that means something.
 //
 // The arrays are file-scope rather than automatic. A Pebble app's stack is
-// small and this is 361 bytes that would otherwise be live across four calls.
+// small and this is 721 bytes that would otherwise be live across four calls.
 // ---------------------------------------------------------------------------
 
 #define COV_NONE 0
@@ -172,10 +173,13 @@ static int16_t band_depth(const Layout *lo, uint8_t weight) {
 
 // The track the markers sit on, and its two ends.
 //
-// The rail runs the window and no further, which is the only thing saying where
-// the horizon is: past it the ring is not empty, it is simply not being shown.
-// The end caps are radial and full ring depth, so the boundary reads as a wall
-// rather than as the rail having faded out.
+// The rail runs the window and no further. With the window a full turn it closes
+// on itself, and the two end caps land on the same spoke thirty degrees behind
+// the hour hand — one wall, drawn twice. It is radial and full ring depth so that
+// it reads as a wall rather than as a gap in the rail, because it is the one
+// place on the ring where neighbouring angles are not neighbouring times: the
+// lookahead's last hour runs into it from one side and the overdue linger from
+// the other.
 static void draw_rail(GContext *ctx, const Layout *lo) {
   int32_t a0 = angle_at(0), a1 = angle_at(RING_SPAN_MIN);
   draw_ring_arc(ctx, lo, a0, a1, lo->r_in, COL_INK);
@@ -187,7 +191,7 @@ static void draw_rail(GContext *ctx, const Layout *lo) {
 static void draw_bands(GContext *ctx, const Layout *lo) {
   // One fill per *run* of equally weighted minutes, not one per minute: a band
   // is a span, s_cov already holds it as one, and an annular sector drawn once
-  // has square ends where 360 overlapping ones would have neither.
+  // has square ends where 720 overlapping ones would have neither.
   //
   // Shallower pass first. Where a running band abuts an upcoming one the two
   // runs can land on the same pixel of rim — consecutive minutes are under a
@@ -272,7 +276,7 @@ void dial_draw(GContext *ctx, const Layout *lo, time_t now) {
 
   // An empty window hides the track along with the markers it would have
   // carried. The rail is a scale, and a scale with nothing on it is a claim
-  // about the next six hours that the face cannot make — the ring is blank when
+  // about the next eleven hours that the face cannot make — the ring is blank when
   // the calendar is clear and blank when the companion has never spoken, and
   // only the bottom row can tell those apart. Drawing the rail anyway would make
   // it look answered. What is left is a plain analog clock, which is what a

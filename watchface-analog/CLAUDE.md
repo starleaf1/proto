@@ -80,15 +80,17 @@ If you need more information on the `pebble` command or a sub-command, append
 Two ways in, both seeding the same set: a running appointment with the hour hand
 inside it, two overlapping bands that must flatten into one, two point entries too
 close to draw apart that must merge, an overdue reminder behind the hour hand, a
-marker sitting on top of a band, an appointment running past the five-hour horizon
+marker sitting on top of a band, an appointment running past the eleven-hour horizon
 that must clip at the end cap, one entry just inside that horizon, and one past it
-that must not draw at all.
+that must not draw at all. The last three land against the seam, so the end cap is seen
+with the lookahead running into it from one side and the overdue reminder from the
+other.
 
 ```bash
 # Over the wire, against an ordinary build - preferred
 tools/send-demo-events.py                    # the running emulator, or start one
 tools/send-demo-events.py --emulator flint   # a specific device codename
-tools/send-demo-events.py --clear            # flush with no records: an empty six hours
+tools/send-demo-events.py --clear            # flush with no records: an empty window
 tools/send-demo-events.py --remove 1 5       # delta, no flush
 tools/send-demo-events.py --dry-run          # print the blob and what it says
 tools/send-demo-events.py --list             # which emulators are up, and how
@@ -196,7 +198,9 @@ watchface-analog/
 reference** (`tools/make-menu-icon.py` is not — it draws this face's own icon). They
 carry no rendering knowledge, so the copies stay identical except for the window
 constants — this face's
-`RING_BACK_S`/`RING_AHEAD_S` are 1 h and 5 h against the digital face's 1 h and 3 h.
+`RING_BACK_S`/`RING_AHEAD_S` are 1 h and 11 h against the digital face's 1 h and 3 h —
+and `SLOT_FAR_S` in `events.c`, which on this face stops at 5 h rather than following
+the ring, because the countdown carries a single digit of hours.
 A fix to the decoder or the battery estimate belongs in both.
 
 **One image resource, and it is the launcher icon.** Every glyph the *face* draws is
@@ -271,7 +275,7 @@ There are two files because the selector runs an icon in a different mode per pl
   `gabbro` this is the whole ballgame: that launcher draws the icon **only** for the
   highlighted row, so an icon that failed on magenta would never be seen at all.
 - **The icon carries one band on the rim and no rail under it.** On the face the rail
-  spans half the ring and the band sits on it a quarter deeper, which is the grammar the
+  runs the ring and the band sits on it a quarter deeper, which is the grammar the
   whole ring is read by. At 25 px across, a 2 px rail under a 3 px band is one shape with
   it - a quarter of the ring's depth is not a difference this many pixels can hold - so
   the icon states the band alone and lets the rim be the scale. The band sits in the
@@ -291,7 +295,7 @@ Each of these was tried the other way first.
   here a marker sits at the clock angle of its own time and stays there, and it is the
   *window* that sweeps. Both are the same `f(t - now)` read from opposite ends. The
   payoff is that a three o'clock meeting is at the 3.
-- **There is no "now" mark.** Six hours is half a turn of a twelve-hour dial, so the
+- **There is no "now" mark.** Twelve hours is one turn of a twelve-hour dial, so the
   ring runs at thirty degrees to the hour — the hour hand's own rate — and the hand
   therefore points at the present position on the timeline by construction. Adding a
   mark would be adding a second one. This is also why this face has no element whose
@@ -300,13 +304,18 @@ Each of these was tried the other way first.
 - **The ring is not graduated.** The twelve dial ticks are its scale as well as the
   clock's. Graduating it separately would put two scales in two concentric lanes on a
   display with one ink.
-- **Half the ring is empty, and that is not "nothing scheduled".** The rail spans the
-  window and stops, with a radial end cap at each end. Past the cap the ring is not
-  free — it is not being shown.
+- **The ring has one seam, thirty degrees behind the hour hand.** The window is a full
+  turn — one hour behind, eleven ahead — so its two ends meet, and the rail's two end
+  caps land on the same spoke and read as one radial wall. It is the one place on the
+  ring where neighbouring angles are not neighbouring times: the last of the lookahead
+  runs into it from one side, eleven hours out, and the overdue linger from the other,
+  an hour gone. The split was chosen over a seam at the hand itself (none behind, twelve
+  ahead) because the overdue reminder behind the hour hand is a reading in its own
+  right, and over two-and-ten because eleven is the furthest the ring can see.
 - **An empty window takes the rail with it, and the face is then a plain clock.** When
-  nothing in the table falls inside the six hours, the rail and its caps do not draw at
+  nothing in the table falls inside the window, the rail and its caps do not draw at
   all. The rail is the scale the markers are read against, and a scale with nothing on
-  it states that the next six hours are clear — which is a claim the watch cannot make,
+  it states that the next eleven hours are clear — which is a claim the watch cannot make,
   because the ring is equally bare when the companion has never spoken and only the
   bottom row tells those two apart. Drawing it anyway makes an unanswered question look
   answered. Nothing else moves: `layout_compute()` never sees event state, so the disc,
@@ -385,13 +394,14 @@ Each of these was tried the other way first.
   the radius rather than three purely so the deeper one has somewhere to be deeper into.
 - **The coverage array is one byte per minute, not per degree.** A minute is 0.58 px on
   flint and 2.1 on gabbro, so a per-degree bucket would fold two minutes together and
-  cost gabbro a pixel of placement. Six hours is 360 minutes over 180 degrees — the
-  tempting one-to-one is the wrong way round.
+  cost gabbro a pixel of placement. Twelve hours is 720 minutes over 360 degrees, and a
+  per-degree array fitting the turn exactly is the temptation — it would hold two
+  minutes to a byte.
 - **Every angle on the ring is a base plus a span, never a fresh absolute.** The window
-  is half a turn and rides with the hour hand, so it straddles twelve o'clock for six
-  hours out of every twelve. Reducing both ends mod a turn independently puts the end
-  behind the start, and `graphics_fill_radial` draws nothing at all when the start is
-  the larger — a third of the day would render blank. `fill_ring_band()` normalises the
+  is a full turn and rides with the hour hand, so the rail straddles twelve o'clock at
+  every hour of the day and a band does whenever it covers twelve. Reducing both ends
+  mod a turn independently puts the end behind the start, and `graphics_fill_radial`
+  draws nothing at all when the start is the larger — the rail itself would never draw. `fill_ring_band()` normalises the
   start and carries the span, then splits at the boundary.
 - **The ring sweeps the opposite way from the digital face's arc.** There the angle
   decreased as the strip went down, so a band started from its later end. Here time
@@ -412,8 +422,9 @@ Each of these was tried the other way first.
   two of the three displays those cancel; the third number is a row that stopped
   existing.
 - **The countdown is `"%d:%02d"`, not `"%02d:%02d"`.** One digit of hours rather than two
-  is what fits it into flint's disc, and nothing is lost: the far tier reaches five hours
-  and a count-up cannot outrun a meeting. It is clamped at 9:59 so it can never grow.
+  is what fits it into flint's disc, and nothing is lost: the far tier stops at five
+  hours — short of the ring's eleven, for exactly this reason — and a count-up cannot
+  outrun a meeting. It is clamped at 9:59 so it can never grow.
 - **The countdown's sign is the direction, and it is the only thing that carries it.**
   `+` while an appointment is running, `-` before anything starts. The reading used to be
   a progress bar under the digits, which drew only while something was running — so the
@@ -467,13 +478,13 @@ Each of these was tried the other way first.
   gated on `band_inset`, and it is only ever reached on the round display. The tier
   above it needs no line at all: both roads into the companion-down state null the
   maneuver upstream, so nav cannot be active while the alert draws.
-- **The companion-down alert says `NO LINK` on the rectangles and shows only its glyph
+- **The companion-down alert says `DISCONNECTED` on the rectangles and shows only its glyph
   on `gabbro`.** It is the one reading in the band with no number under it, so the
   slashed phone is the only glyph on this face asked to carry a whole state on its own
   — the other two qualify a figure — and a reader who has not learnt it has nothing to
   learn it from. Where the band is a strip of screen there is room to spell it out.
   Where it is a row of the disc there is not: `layout_compute()` sizes the disc from the
-  widest string each row can hold, so a seven-character label would grow the plate over
+  widest string each row can hold, so a twelve-character label would grow the plate over
   the dial permanently in order to state something that is true for minutes at a time —
   and would hand straight back the radius that merging the two rows into one just
   bought. The merged row is budgeted against `"000 KM"`, which is the widest reading it

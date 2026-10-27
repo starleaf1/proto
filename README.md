@@ -15,9 +15,9 @@ their duration; tasks and reminders are wedges poking inward off the ruler. Besi
 digital clock, level with the pointer, and under that the date, a countdown, the next
 turn and whatever is running out, left-aligned against the strip.
 
-**`watchface-analog`** is a circular analog clock whose rim is a **six-hour timeline** —
-one hour behind, five ahead — with each entry at the clock angle of its own time, so a
-three o'clock meeting sits at the 3. Six hours is half a turn of a twelve-hour dial, so
+**`watchface-analog`** is a circular analog clock whose rim is a **twelve-hour timeline** —
+one hour behind, eleven ahead — with each entry at the clock angle of its own time, so a
+three o'clock meeting sits at the 3. Twelve hours is one turn of a twelve-hour dial, so
 the ring advances at thirty degrees to the hour: the hour hand's own rate, which makes
 the hand the now mark — it points at an appointment's band while the appointment is
 running, stopping short of the ring so the markers keep their lane to

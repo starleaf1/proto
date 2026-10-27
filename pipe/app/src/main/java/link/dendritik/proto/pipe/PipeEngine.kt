@@ -59,7 +59,7 @@ fun backoffDelayMs(baseMs: Long, misses: Int, capMs: Long): Long {
  *  - the calendar changed (an edit here, or a sync landing from the server), or the
  *    user changed which calendars are sent, which is the same kind of news
  *  - the watch reconnected, which sends even if the scan looks unchanged
- *  - time passed, so the six-hour window slid; nothing "changed" but the answer did
+ *  - time passed, so the window slid; nothing "changed" but the answer did
  *  - the user pressed re-sync, which is the only one of the four that is not a change
  *
  * The third of those is also the liveness heartbeat, and there is exactly one alarm for
@@ -209,7 +209,7 @@ class PipeEngine(private val context: Context) {
      *
      * The beat covers the one case a flush cannot: with
      * the watch connected `reconcile(force = true)` always sends at least one message —
-     * a zero-record flush is how "the next six hours are clear" is said — so `false`
+     * a zero-record flush is how "the window is clear" is said — so `false`
      * here with a live link means the send threw, and the beat is the retry. With the
      * watch away [PebbleSender.beat] stands down on its own.
      */

@@ -14,9 +14,9 @@ poking inward off the ruler, and the hour is numbered in a small lane just insid
 digital clock sits level with the now mark, and the date, a countdown, the next turn and
 whatever is running out stack beneath it, left-aligned against the strip.
 
-**`watchface-analog/`** is a circular analog clock whose rim is a six-hour timeline —
-one hour behind, five ahead — laid on the dial at the clock angle of each entry's own
-time, so a three o'clock meeting is at the 3. Six hours is half a turn of a twelve-hour
+**`watchface-analog/`** is a circular analog clock whose rim is a twelve-hour timeline —
+one hour behind, eleven ahead — laid on the dial at the clock angle of each entry's own
+time, so a three o'clock meeting is at the 3. Twelve hours is one turn of a twelve-hour
 dial, which puts the ring at thirty degrees to the hour: the hour hand's own rate, so
 the hand *is* the now mark and there is no second one. The date and the countdown sit
 in a disc at the centre, drawn over the hands.
@@ -146,12 +146,13 @@ Shared by both faces:
   running at the hour hand's own rate. A marker sits at the clock angle of its own time
   and stays there; the hour hand points at the present position on the timeline by
   construction, so a separate mark would be a second one.
-- **Half the ring is empty, and that is not "nothing scheduled".** The rail spans the
-  visible window and stops, with a radial end cap at each end. Past the cap the ring is
-  not free — it is not being shown.
+- **The ring has a seam thirty degrees behind the hour hand.** The window is a full
+  turn, one hour behind and eleven ahead, so its two end caps meet on one spoke. Either
+  side of that wall the times are eleven hours apart: the end of the lookahead on one
+  side, the overdue linger on the other.
 - **With nothing in the window the rail does not draw either, and the face is a plain
   analog clock.** The rail is the scale the markers are read against; carrying no
-  markers it would be asserting a clear six hours, and the ring looks the same when the
+  markers it would be asserting a clear eleven hours, and the ring looks the same when the
   companion has never spoken. The digital face's ruler stays, because it also carries
   the hour numbers and the now mark.
 - **On `gabbro` a maneuver hides a low battery, and on the rectangles it does not.**

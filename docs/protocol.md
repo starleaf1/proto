@@ -106,7 +106,7 @@ dropped.
   `MORE` and multi-message recovery are not reached in practice.
 - `MORE` is set on every message of a multi-message sync except the last.
 - An interrupted sync needs no recovery: the next `FLUSH` restarts it.
-- A flush carrying **zero** records is how the companion says the next six hours are
+- A flush carrying **zero** records is how the companion says the window is
   clear. It must still be sent; sending nothing would leave the watch showing what it
   had.
 - **The watch still accepts deltas** — `CalFlags = 0`, upserts and removes applied to
@@ -319,7 +319,7 @@ when it does.
 
 **That throttle is per app, not per alarm, which is why the slow tier is not a
 scheduler of its own.** The companion already needs one periodic wake-up to re-scan the
-six-hour window, and a second alarm at the same period would not buy a second wake-up —
+window, and a second alarm at the same period would not buy a second wake-up —
 it would queue behind the first for one budget and make both late, spending the
 three-period grace on self-inflicted contention. So there is exactly one alarm: it
 re-scans, sends the flush, and speaks a bare heartbeat only if that could not go out.

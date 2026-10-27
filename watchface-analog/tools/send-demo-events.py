@@ -12,7 +12,7 @@ genuinely had no command-line path, which is why `demo_seed()` exists at all.
 The set covers every marker case at once — a running appointment with the hour hand
 inside it, two overlapping bands that must flatten into one, clustered point entries
 that must merge, an overdue reminder behind the hour hand, a marker sitting on top of a
-band, an appointment running past the five-hour horizon that must clip at the end cap,
+band, an appointment running past the eleven-hour horizon that must clip at the end cap,
 one entry just inside that horizon and one past it that must not draw at all. **Keep it
 in step with `demo_seed()` in `src/c/proto.c`**; the two are meant to show the same face.
 
@@ -82,9 +82,9 @@ DEMO = [
     (6, 160, 0, EV_TASK, "4 min from 7 -- too close to draw apart"),
     (7, 164, 0, EV_TASK, "-> one deeper, blunter wedge"),
     (8, 110, 0, EV_TASK, "sits on top of a band"),
-    (9, 270, 90, EV_APPOINTMENT, "runs past the 5 h horizon -- clips at the end cap"),
-    (10, 295, 0, EV_TASK, "just inside the horizon"),
-    (11, 355, 0, EV_TASK, "past it -- must not draw"),
+    (9, 630, 90, EV_APPOINTMENT, "runs past the 11 h horizon -- clips at the end cap"),
+    (10, 655, 0, EV_TASK, "just inside the horizon"),
+    (11, 690, 0, EV_TASK, "past it -- must not draw"),
 ]
 
 # Nuron quests, as `pipe` now sends them: the same records, but with bit 31 of the
@@ -296,7 +296,7 @@ def main():
     ap.add_argument("--list", action="store_true",
                     help="list running emulators and exit")
     ap.add_argument("--clear", action="store_true",
-                    help="flush carrying no records -- 'the next six hours are empty'")
+                    help="flush carrying no records -- 'the window is empty'")
     ap.add_argument("--remove", nargs="+", type=int, metavar="ID",
                     help="send removes for these ids as a delta, without flushing")
     ap.add_argument("--heartbeat", type=int, default=300, metavar="S",

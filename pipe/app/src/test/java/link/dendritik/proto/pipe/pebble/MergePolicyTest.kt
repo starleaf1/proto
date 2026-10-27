@@ -95,8 +95,8 @@ class MergePolicyTest {
         val after = MergePolicy.merge(calendar, listOf(nur(99, 1)))
         val dropped = before.map { it.id }.toSet() - after.map { it.id }.toSet()
         assertEquals(1, dropped.size)
-        // The one that left is the furthest out, which is the one the six-hour
-        // window was always going to lose first.
+        // The one that left is the furthest out, which is the one the window was
+        // always going to lose first.
         assertEquals(before.last().id, dropped.first())
     }
 

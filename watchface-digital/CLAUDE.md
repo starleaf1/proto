@@ -83,7 +83,7 @@ that must merge, an overdue reminder above the pointer, a marker sitting on top 
 band, and three entries at and past the horizon.
 
 **The last three entries (ids 9-11) are past the horizon on every display.** They are
-`watchface-analog/`'s horizon cases verbatim — that face reaches five hours ahead — which
+`watchface-analog/`'s horizon cases verbatim — that face reaches eleven hours ahead — which
 leaves the two by-copy scripts differing in prose alone. This face reaches three
 hours ahead on the rectangles and three and a half on `gabbro`, so here they only check
 that nothing past the end draws.

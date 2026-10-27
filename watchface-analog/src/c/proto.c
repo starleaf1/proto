@@ -12,9 +12,9 @@
 // ---------------------------------------------------------------------------
 // proto analog — a calendar-driven analog watchface.
 //
-// The rim is a six-hour timeline: one hour behind, five ahead, laid on the dial
+// The rim is a twelve-hour timeline: one hour behind, eleven ahead, laid on the dial
 // at the clock angle of each entry's own time. A three o'clock meeting is at the
-// 3. Six hours is half a turn of a twelve-hour dial, so the ring runs at thirty
+// 3. Twelve hours is one turn of a twelve-hour dial, so the ring runs at thirty
 // degrees to the hour — the hour hand's own rate — and the hand is therefore the
 // "now" mark by construction. It ends level with the ticks' outer end, so the ring
 // stays the markers' lane alone.
@@ -151,9 +151,9 @@ static void demo_seed(time_t now) {
   events_upsert(6,  now + 160 * 60,  0, EV_TASK);        // 4 min apart -> too close
   events_upsert(7,  now + 164 * 60,  0, EV_TASK);        // -> one deeper, blunter wedge
   events_upsert(8,  now + 110 * 60,  0, EV_TASK);        // sits on top of a band
-  events_upsert(9,  now + 270 * 60, 90, EV_APPOINTMENT); // runs past the horizon: clips
-  events_upsert(10, now + 295 * 60,  0, EV_TASK);        // just inside the horizon
-  events_upsert(11, now + 355 * 60,  0, EV_TASK);        // past it: must not draw
+  events_upsert(9,  now + 630 * 60, 90, EV_APPOINTMENT); // runs past the horizon: clips
+  events_upsert(10, now + 655 * 60,  0, EV_TASK);        // just inside the horizon
+  events_upsert(11, now + 690 * 60,  0, EV_TASK);        // past it: must not draw
 }
 #endif
 
