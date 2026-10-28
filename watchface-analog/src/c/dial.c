@@ -1,6 +1,8 @@
 #include "dial.h"
 #include "events.h"
 #include "theme.h"
+#include "wx.h"
+#include "wxglyph.h"
 #include <string.h>
 
 // ---------------------------------------------------------------------------
@@ -269,6 +271,46 @@ static void draw_ticks(GContext *ctx, const Layout *lo) {
   }
 }
 
+// Severe weather: a glyph at the clock angle of its onset, halfway between the
+// plate and the ticks. The same anchoring as every marker on the ring — a storm at
+// three is at the 3 — so the hour hand arrives at the glyph as the weather does.
+//
+// It leaves the dial WX_NEAR_S before that, for the slot, because the hand gets
+// there first: at r_wx a minute is under half a pixel of arc on flint, and the
+// hand and its halo cover a glyph about twenty minutes before its onset.
+//
+// Each sits on a background disc a halo wider than itself. Where the onset is on
+// the hour that disc cuts the inner end of the tick beneath it — an hourly
+// forecast puts one on 12, 3, 6 or 9 a third of the time, and there the glyph is
+// the reading. Two closer than a disc's width along the arc would overlap; the
+// earlier keeps its place and the later waits until the earlier has gone.
+//
+// Weather never draws the rail. The rail is the calendar's scale, and a storm on
+// an empty afternoon does not make the afternoon's calendar any less unknown.
+static void draw_wx(GContext *ctx, const Layout *lo, time_t now) {
+  const WxAlert *up[WX_MAX];
+  int n = wx_upcoming(now, RING_AHEAD_S, true, up, WX_MAX);
+  if (n == 0) return;
+
+  int16_t side = lo->wx_side;
+  int16_t disc = side / 2 + 2;
+  int32_t min_gap = angle_of_px(2 * disc, lo->r_wx);
+  time_t win0 = now - RING_BACK_S;
+  int32_t last = 0;
+
+  for (int i = 0; i < n; i++) {
+    int32_t a = angle_at((int32_t)(up[i]->onset - win0) / 60);
+    if (i > 0 && a - last < min_gap) continue;
+    last = a;
+
+    GPoint c = point_on_circle(lo->center, lo->r_wx, a);
+    graphics_context_set_fill_color(ctx, COL_BG);
+    graphics_fill_circle(ctx, c, disc);
+    wx_glyph(ctx, GRect(c.x - side / 2, c.y - side / 2, side, side),
+             up[i]->hazard);
+  }
+}
+
 void dial_draw(GContext *ctx, const Layout *lo, time_t now) {
   s_base_a = angle_of_time(now - RING_BACK_S);
   build_coverage(now);
@@ -285,6 +327,7 @@ void dial_draw(GContext *ctx, const Layout *lo, time_t now) {
   draw_bands(ctx, lo);
   draw_wedges(ctx, lo);
   draw_ticks(ctx, lo);
+  draw_wx(ctx, lo, now);
 }
 
 // One hand: a quad tapering from the tail, behind the hub, to a blunt tip.

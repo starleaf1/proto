@@ -86,6 +86,11 @@ that must not draw at all. The last three land against the seam, so the end cap 
 with the lookahead running into it from one side and the overdue reminder from the
 other.
 
+Weather rides the same message: gusts ten minutes out, which must be in the slot and not
+on the dial; rain at the next 12, 3, 6 or 9 at least 45 minutes away, which must cut the
+major tick; a quarter-hour onset; two onsets twenty minutes apart, the later of which
+must not draw; heat against the seam; and snow past the horizon, which must not draw.
+
 ```bash
 # Over the wire, against an ordinary build - preferred
 tools/send-demo-events.py                    # the running emulator, or start one
@@ -94,6 +99,10 @@ tools/send-demo-events.py --clear            # flush with no records: an empty w
 tools/send-demo-events.py --remove 1 5       # delta, no flush
 tools/send-demo-events.py --dry-run          # print the blob and what it says
 tools/send-demo-events.py --list             # which emulators are up, and how
+tools/send-demo-events.py --wx-running       # a storm under way: the filled box
+tools/send-demo-events.py --wx-unknown       # heat sent as a hazard no watch knows
+tools/send-demo-events.py --wx-clear         # an empty weather blob: no glyphs
+tools/send-demo-events.py --no-wx            # leave the key out: the watch keeps its own
 
 # Compiled in
 PROTO_DEMO=1 pebble build
@@ -101,7 +110,7 @@ PROTO_DEMO=1 pebble build
 
 The script exercises the decode path in `wire.c`; `PROTO_DEMO` bypasses it. **The two
 are meant to show the same face** - extend `demo_seed()` in `src/c/proto.c` and `DEMO`
-in the script together, and never ship a build with the flag set.
+(and `WX_DEMO`) in the script together, and never ship a build with the flag set.
 
 `--emulator` is optional: with no target the script sends to whichever emulator is
 already up, starts `flint` if none is, and refuses to guess when several are running.
@@ -188,14 +197,18 @@ watchface-analog/
     slots.{c,h}         The countdown, the maneuver and the warning
     wire.{c,h}          The AppMessage inbox and the two watchdogs
     wbatt.{c,h}         The watch's own hours-remaining estimate
+    wx.{c,h}            The weather table, its persistence, the slot's pick
+    wxglyph.{c,h}       The weather icons
   src/pkjs/index.js     PebbleKit JS stub (deliberately does nothing)
-  resources/images/     The launcher icon, the only image on the face
+  resources/images/     The launcher icon, and pebble_weather_icons/
   tools/                grab.py, send-demo-events.py, make-menu-icon.py
 ```
 
-`events.{c,h}`, `wire.{c,h}`, `wbatt.{c,h}`, `tools/grab.py` and
-`tools/send-demo-events.py` are shared with `watchface-digital/` by **copy, not by
-reference** (`tools/make-menu-icon.py` is not — it draws this face's own icon). They
+`events.{c,h}`, `wire.{c,h}`, `wbatt.{c,h}`, `wx.{c,h}`, `wxglyph.{c,h}`, `tools/grab.py`
+and `tools/send-demo-events.py` are shared with `watchface-digital/` by **copy, not by
+reference** (`tools/make-menu-icon.py` is not — it draws this face's own icon).
+`wxglyph` is the one copied file that draws anything, and it draws with nothing but the
+SDK, so neither face can draw a storm its own way. The rest
 carry no rendering knowledge, so the copies stay identical except for the window
 constants — this face's
 `RING_BACK_S`/`RING_AHEAD_S` are 1 h and 11 h against the digital face's 1 h and 3 h —
@@ -203,7 +216,10 @@ and `SLOT_FAR_S` in `events.c`, which on this face stops at 5 h rather than foll
 the ring, because the countdown carries a single digit of hours.
 A fix to the decoder or the battery estimate belongs in both.
 
-**One image resource, and it is the launcher icon.** Every glyph the *face* draws is
+**Two kinds of image resource: the launcher icon, and the weather icons.** The weather icons
+are 12 px pixel art in two sets — `bw/` for `flint`, `color/` for `emery` and `gabbro`,
+declared under one name each (`WX_RAIN`, …) the way `MENU_ICON` is — and are drawn at
+1:1, because pixel art does not survive scaling. Every other glyph the *face* draws is
 drawn from primitives or a normalised point table, so it stays crisp at three sizes and
 costs nothing from the resource budget. The icon in the watchface selector cannot be:
 the firmware draws that list, not the app, so the shape has to exist as a bitmap before
@@ -496,6 +512,35 @@ Each of these was tried the other way first.
   half of the band to its left is empty by construction. The pair stays right-aligned,
   so it sits where the lone glyph sat and grows leftward into that room rather than
   shifting into it: nothing on the band moves when the words appear.
+- **A weather icon sits inside the ticks, not on the ring, and is 12 px everywhere.**
+  Halfway between the plate's rim and the ticks' outer end (`r_wx`), at the clock angle
+  of its onset. The ring is the calendar's lane and is a few pixels deep; inside the
+  plate it would grow the plate. It is drawn under the hands like everything else on the
+  dial, so the hour hand reaches it as the weather does. Drawn shapes sized to the lane
+  came first, and at 26 px on `gabbro` they read as complications rather than as
+  weather; the icons are bitmaps at their native size, which on `flint` is exactly what
+  the lane holds. Ice borrows the hail icon — a crystal, not a flake — and a hazard
+  this watch predates gets the warning triangle.
+- **The glyph's halo cuts the major tick under it.** Hourly forecasts put an onset on the
+  hour, and on 12, 3, 6 or 9 a third of the time, where the major tick's inner end comes
+  within a few pixels of `r_wx`. There the glyph is the reading. Inward the halo costs
+  nothing: the plate is painted after and covers it.
+- **An alert leaves the dial thirty minutes before it starts** (`WX_NEAR_S`) and moves to
+  the notification slot, counting `hh:mm` to its onset, then in a filled black box to
+  its end. The
+  hour hand gets to the glyph before the weather does: at `r_wx` a minute is under half a
+  pixel of arc on `flint`, and the hand with its halo covers a glyph about twenty minutes
+  early, so the icon would vanish just as the storm got close.
+- **Weather never draws the rail.** The rail is the calendar's scale, and a storm on an
+  empty afternoon does not make that afternoon's calendar any less unknown.
+- **In the slot, weather ranks below the maneuver and above both batteries,** and one
+  resolver, `wx_at()`, decides which box it takes. On `gabbro` it is the single slot. On
+  the rectangles it takes nav's half when there is no turn and warn's when there is — and
+  never while the companion is down, because `DISCONNECTED` spells itself across nav's
+  half and outranks it. The reading is the icon and `"%02d:%02d"` in black — the icon
+  carries the hazard, and the number is a time, inked like every other time. Clamped at
+  99:59 and narrower than the `"000 KM"` the plate is budgeted against, so nothing moves
+  when it appears.
 - **The date row does not centre itself when there is no countdown.** The countdown's
   row is reserved whether it draws or not. A disc that resized when an appointment
   appeared would move every row in it at the one moment the reader is watching one.
@@ -514,7 +559,7 @@ out, because every marker's position, prominence and existence is a function of 
 need a faster tick, and with it the flash subsystem and `app_focus_service` subscription
 the redesign deleted.
 
-**Two persistent-storage keys, and the event table is one of them.** A watchface is not
+**Three persistent-storage keys, and the event table is one of them.** A watchface is not
 a resident program — the firmware kills it whenever the user opens anything else and
 starts it again when they come back — so key 1 holds `wbatt`'s drain anchor, which could
 never accumulate a sample history in RAM, and key 2 holds the calendar table, which used
@@ -523,6 +568,8 @@ slow tier's 600 s, so a glance at a notification cost up to ten minutes of an em
 An empty ring does not read as "waiting", it reads as "nothing scheduled". `events_save()`
 runs in `deinit()` and `events_load()` in `init()`; entries carry absolute starts, so
 `events_gc()` drops whatever expired while the app was gone on the first paint back.
+Key 3 holds the weather table for the same reason, `wx_save()` and `wx_load()` beside the
+calendar's; an alert carries an absolute onset and end, and `wx_gc()` retires it.
 
 **Two `AppTimer`s**, both in `wire.c`: the companion liveness watchdog and the nav-slot
 expiry. Both follow the same single-owner pattern — one `*_sync()` function decides

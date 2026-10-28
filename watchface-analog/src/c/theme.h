@@ -62,6 +62,7 @@
 #define COL_ALERT       PBL_IF_COLOR_ELSE(GColorRed, GColorBlack)
 #define COL_WARN        PBL_IF_COLOR_ELSE(GColorWindsorTan, GColorBlack)
 
+
 // Two text roles, not the digital face's four, and both of them the firmware's own.
 //
 // There is no clock numeral here — the hands are the clock — so the digital face's

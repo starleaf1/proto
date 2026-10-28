@@ -19,6 +19,11 @@ import link.dendritik.proto.pipe.nuron.NuronWatcher
 import link.dendritik.proto.pipe.pebble.MergePolicy
 import link.dendritik.proto.pipe.pebble.PebbleSender
 import link.dendritik.proto.pipe.protocol.Protocol
+import link.dendritik.proto.pipe.weather.WeatherPrefs
+import link.dendritik.proto.pipe.weather.WeatherSource
+import link.dendritik.proto.pipe.weather.WxHolder
+import link.dendritik.proto.pipe.weather.WxScan
+import link.dendritik.proto.pipe.weather.WxSchedule
 
 /**
  * The delay before the next tick: [baseMs] doubled once per consecutive miss, never past
@@ -85,6 +90,16 @@ class PipeEngine(private val context: Context) {
     private val nuronHolder = NuronHolder()
     private val nuronWatcher = NuronWatcher(context) { reconcile(force = false) }
 
+    // Severe weather. Not a third source of events: it has a key of its own, so the
+    // calendar's merge and cap never see it. Fetched over the network, which is the one
+    // thing here that cannot run inside reconcile — that is synchronous on the main
+    // thread — so the fetch runs ahead of a flush and the flush sends what it left.
+    private val weather = WeatherSource(context)
+    private val weatherPrefs = WeatherPrefs(context)
+    private val wxHolder = WxHolder()
+    private var wxAttemptS = 0
+    private var wxSuccessS = 0
+
     private val alarms = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
     private var receiver: BroadcastReceiver? = null
 
@@ -105,17 +120,32 @@ class PipeEngine(private val context: Context) {
         started = true
         misses = 0          // a new session starts at the base period, not the old one's
 
-        sender.onWatchConnected = { reconcile(force = true) }
+        sender.onWatchConnected = {
+            reconcile(force = true)
+            fetchWeatherIfDue { if (started) reconcile(force = false) }
+        }
         sender.start()
         watcher.start()
         calendarPrefs.watch { reconcile(force = false) }
         nuronWatcher.start()
         battery.start()
+        weather.start()
+        weatherPrefs.watch {
+            // Switched off: the next flush says the sky is clear. Switched on: fetch now
+            // rather than at the next tick, which could be an hour away when backed off.
+            wxSuccessS = 0
+            wxAttemptS = 0
+            reconcile(force = false)
+            fetchWeatherIfDue { if (started) reconcile(force = false) }
+        }
         startTick()
 
         // Forced: we have no idea what the watch is holding at this point, and a
-        // watchface that relaunched while we were dead has nothing.
+        // watchface that relaunched while we were dead has nothing. Weather follows
+        // when its first fetch lands; until then the key is left out and the watch
+        // keeps what it restored.
         reconcile(force = true)
+        fetchWeatherIfDue { if (started) reconcile(force = false) }
         PipeStatus.running = true
     }
 
@@ -128,6 +158,8 @@ class PipeEngine(private val context: Context) {
         receiver?.let { runCatching { context.unregisterReceiver(it) } }
         receiver = null
         battery.stop()
+        weatherPrefs.unwatch()
+        weather.stop()
         calendarPrefs.unwatch()
         watcher.stop()
         nuronWatcher.stop()
@@ -151,13 +183,20 @@ class PipeEngine(private val context: Context) {
         val nuronEvents = nuronHolder.accept(nuron.scan())
         val events = MergePolicy.merge(calendarEvents, nuronEvents)
 
+        // A switch turned off or a grant revoked is a durable zero, known without asking
+        // the network, so it is applied here rather than waiting for a fetch.
+        if (!weather.enabled()) wxHolder.accept(WxScan.Absent)
+        val wx = wxHolder.current((now / 1000).toInt())
+
         PipeStatus.eventCount = events.size
         PipeStatus.calendarEventCount = calendarEvents.size
         PipeStatus.nuronEventCount = nuronEvents.size
         PipeStatus.nuronState = nuronHolder.state
         PipeStatus.calendarGranted = calendar.hasPermission()
+        PipeStatus.wxState = wxHolder.state
+        PipeStatus.wxAlertCount = wx?.size ?: 0
         PipeStatus.watchConnected = sender.isWatchConnected()
-        val sent = sender.syncCalendar(events, force)
+        val sent = sender.syncCalendar(events, wx, force)
         if (sent) {
             PipeStatus.lastSyncAtMs = System.currentTimeMillis()
             noteSuccess()
@@ -280,6 +319,31 @@ class PipeEngine(private val context: Context) {
         PipeStatus.resync = if (flushNow()) Resync.SENT else Resync.NOTHING_SENT
     }
 
+    /**
+     * Start a forecast fetch if one is owed, and call [then] on the main thread when it
+     * has landed in [wxHolder]. Returns false, and never calls [then], when none was
+     * started — switched off, not due, or one already in flight.
+     *
+     * [then] is called even if the engine has stopped meanwhile — [stop] answers a fetch
+     * in flight — because the tick's is what finishes its held broadcast. Each caller
+     * checks [started] for itself.
+     *
+     * A failed fetch is not a miss. [misses] counts flushes that did not reach the
+     * watch; a forecast server that is down says nothing about the Bluetooth link.
+     */
+    private fun fetchWeatherIfDue(then: () -> Unit): Boolean {
+        if (!weather.enabled()) return false
+        val nowS = (System.currentTimeMillis() / 1000).toInt()
+        if (!WxSchedule.due(nowS, wxAttemptS, wxSuccessS)) return false
+        val launched = weather.fetch { scan ->
+            wxHolder.accept(scan)
+            if (scan is WxScan.Alerts) wxSuccessS = scan.fetchedAtS
+            then()
+        }
+        if (launched) wxAttemptS = nowS
+        return launched
+    }
+
     // ---------------------------------------------------------------------------
     // The tick
     // ---------------------------------------------------------------------------
@@ -309,8 +373,21 @@ class PipeEngine(private val context: Context) {
             override fun onReceive(context: Context, intent: Intent) {
                 when (intent.action) {
                     ACTION_TICK -> {
-                        tick()
-                        armTick()   // one-shot, re-armed, so a missed wake-up cannot compound
+                        // A fetch that is due goes first, so the tick's one message
+                        // carries the forecast it fetched rather than the one before.
+                        // goAsync holds the alarm's wakelock until the flush is out; the
+                        // fetch is bounded by its timeouts, well inside a background
+                        // broadcast's allowance, and is always answered — see
+                        // WeatherSource.
+                        val held = goAsync()
+                        val after = {
+                            if (started) {
+                                tick()
+                                armTick()   // one-shot, re-armed, so a missed wake-up cannot compound
+                            }
+                            held.finish()
+                        }
+                        if (!fetchWeatherIfDue(after)) after()
                     }
                     ACTION_RESYNC -> resync()
                 }

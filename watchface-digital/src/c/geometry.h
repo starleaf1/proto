@@ -53,6 +53,17 @@
 #define POINTER_HALF_PCT   100   // half-extent along the track
 #define POINTER_TIP_GAP      3   // clearance from the notch zone's inner edge
 
+// Which side of the track the calendar's marks stand on: +1 inboard, toward the content
+// column, -1 outboard. Bands, wedges and their caps all take their depth through this.
+//
+// The rectangles' strip is hard against the screen edge, so there is no outboard and
+// the marks share the notch zone, under the notches. gabbro's strip stands left of
+// centre with empty glass beyond it, so the marks go there instead, left of the notches,
+// and the ruler and the calendar each get a lane of their own: the notches stop crossing
+// the bands, and the hour labels stop sharing a column with the wedges. What it costs is
+// nothing on the inboard side, which gets *narrower* — see layout_compute.
+#define MARK_DIR PBL_IF_ROUND_ELSE(-1, 1)
+
 // The "now" rule's thickness, as a fraction of the radius. Thicker than an hour notch
 // on both colour displays, because it has to read as a different kind of thing from the
 // ruler it crosses — hue says that too, but hue is not a shape.
@@ -103,14 +114,20 @@ typedef struct {
   int16_t radius;      // min(w, h) / 2 — the scale every other size derives from
   int16_t margin;
   int16_t notch_len;   // full notch; also the reference for every band depth
+  int16_t min_w;       // a quarter-hour notch's stroke width
+  int16_t hour_w;      // an hour notch's: thicker, not longer — see draw_notches
+  int16_t mark_reach;  // the deepest a marker goes from the track: a merged one's depth
   // Depths inward from the track, and the order of them is not the same on both kinds
   // of display, because the "now" mark is not the same element.
   //
   // Colour:  notch zone | rule, over the markers | hour labels        | zone
   // flint:   notch zone | hour labels, then the wedge over them both  | zone
+  // gabbro:  markers | track | notch zone | rule's end | hour labels  | zone
   //
   // On colour the rule is only as deep as the strip's own elements, so the labels go
   // past it and past the markers with it, and nothing is ever over or under a number.
+  // On gabbro the markers are outboard (MARK_DIR), so the rule reaches out over them and
+  // inboard only past the notches, and the labels come in by the markers' depth.
   // On flint they go *between* the ruler and the wedge — inside the free area the wedge
   // already claimed, so they cost that platform no width whatever. What they share that
   // area with they deal with two different ways: a marker they cover, having a plate and
@@ -120,6 +137,7 @@ typedef struct {
   int16_t label_w;
 #ifdef PBL_COLOR
   int16_t rule_len;    // the "now" rule: exactly the depth it has to strike through
+  int16_t rule_out;    // ...and how far it reaches outboard of the track
 #else
   int16_t ptr_tip;     // the wedge's apex, POINTER_TIP_GAP past the label lane
 #endif
@@ -197,8 +215,9 @@ GPoint step_in(GPoint p, int32_t a, int32_t d);
 GPoint step_side(GPoint p, int32_t a, int32_t d);
 
 // A band on the track: everything between `u0` and `u1` (seconds from the top of the
-// visible window), filled `depth` px inward from the track, ending square on the ray at
-// each end and reaching one pixel outboard of the track.
+// visible window), filled `depth` px from the track on the marks' side (MARK_DIR),
+// ending square on the ray at each end and reaching one pixel past the track the other
+// way.
 //
 // Square ends are the reason this is a fill and not a stroke. A band used to be one thick
 // line per covered minute, and a thick line's caps are semicircles, so the first and last
@@ -212,6 +231,12 @@ GPoint step_side(GPoint p, int32_t a, int32_t d);
 // the track, filled to a depth — and it had the same lozenge ends for the same reason.
 void fill_track_band(GContext *ctx, const Layout *lo, int32_t u0, int32_t u1,
                      int16_t depth, GColor col);
+
+// The same fill between two signed depths, `d0` through `d1` inclusive, on either side
+// of the track. fill_track_band() is this with the side chosen for it; the rule calls it
+// directly, because on gabbro it straddles the track.
+void fill_track_span(GContext *ctx, const Layout *lo, int32_t u0, int32_t u1,
+                     int16_t d0, int16_t d1, GColor col);
 
 // The tight bounding box of one text row's ink inside `box`, padded a little.
 // Follows ROW_ALIGN, because a plate that stayed centred while the text moved left
@@ -235,7 +260,7 @@ void knock_out(GContext *ctx, GRect r);
 void draw_tri(GContext *ctx, GPoint p0, GPoint p1, GPoint p2,
               GColor ink, bool filled, int16_t stroke_w, bool halo);
 
-// A point marker: a wedge off the track at `u`, `depth` px deep, `half_len` of track
+// A point marker: a wedge off the track at `u` on the marks' side, `depth` px deep, `half_len` of track
 // either side of it at the base and `tip_half` either side at the inner end.
 //
 // Blunt-tipped, and that is not a detail. A triangle whose depth is about three times

@@ -45,15 +45,22 @@ link.dendritik.proto.pipe
 │   ├── CalendarPrefs.kt    where the choice is kept; the engine listens to it
 │   └── EventFacts.kt       pure data — the framework boundary
 ├── battery/PhoneBattery.kt ACTION_BATTERY_CHANGED
+├── weather/
+│   ├── Forecast.kt         pure data: WxAlert, and a forecast series
+│   ├── OpenMeteo.kt        pure: the request URL and the response parser
+│   ├── HazardPolicy.kt     pure: what counts as severe, and when it starts
+│   ├── WxHolder.kt         pure: WxScan, what to send after a failed fetch, WxSchedule
+│   └── WeatherSource.kt    the switch, coarse location, the fetch — off the main thread
 ├── pebble/
 │   ├── EventBlob.kt        pure: the wire format + EventDiff
+│   ├── WxBlob.kt           pure: the weather blob + SyncGate
 │   └── PebbleSender.kt     debounce, coalesce, chunk, heartbeat
 └── protocol/Protocol.kt    key ids and the wire enums
 ```
 
 ## The architectural rule worth keeping
 
-**Framework types stop at `CalendarSource` and `PhoneBattery`.** Everything below them
+**Framework types stop at `CalendarSource`, `PhoneBattery` and `WeatherSource`.** Everything below them
 sees `EventFacts` and plain integers, which is why the entire wire format is covered by
 JVM unit tests with no device and no Robolectric. Preserve that when adding a source: a
 `NavFacts` equivalent should be pure data produced by a thin framework-facing adapter,
@@ -232,6 +239,37 @@ unpacker could share the same mistake as the packer and both would agree.
 - **Only whole-percent battery changes are reported.** `ACTION_BATTERY_CHANGED` is sticky
   and fires on every temperature and voltage wobble.
 
+## Severe weather
+
+Off until the user switches it on in `MainActivity`; it is the one thing here that sends
+anything about the phone off the phone — its coarse position, rounded to two decimals, to
+open-meteo.com. `HazardPolicy` owns the thresholds; the wire carries a `Hazard` and a time.
+See `docs/protocol.md`, "`WxAlerts` blob".
+
+- **The fetch runs ahead of the tick's flush, not inside `reconcile`.** `reconcile` is
+  synchronous on the main thread and the fetch is network I/O. The tick receiver calls
+  `goAsync()`, which keeps the alarm's wakelock held, fetches if `WxSchedule` says one is
+  due, then ticks and re-arms from the callback — so the tick still sends one message, and
+  it carries the forecast just fetched. The re-arm comes after the flush, as it always
+  has, so the backoff sees this tick's miss.
+- **`WeatherSource` always answers.** Its callback runs exactly once, on the main thread,
+  for a timeout, a missing grant and a switch that is off too, and `stop()` answers a
+  fetch still in flight. The tick's `goAsync` is finished from that callback, so a path
+  that skipped it would hold the broadcast open until the system declared it hung.
+- **A failed fetch is not a miss.** `misses` counts flushes that did not reach the watch;
+  a forecast server that is down says nothing about Bluetooth.
+- **`null` from `WxHolder.current` leaves the key out, and that is not a clear sky.** It
+  is only `null` before the first answer since the process started; the watch keeps what
+  it restored. An empty list *is* a clear sky, and is what a switch turned off sends.
+- **Background location is asked for separately.** From Android 11 a request that
+  includes `ACCESS_BACKGROUND_LOCATION` alongside the foreground grant is refused
+  outright, so `MainActivity` asks for coarse first and then for "Allow all the time".
+  The switch only turns on once both are held.
+- **Whether a fetch gets network in Doze is a claim about the host, unverified.** The
+  companion host's association should put the app on the power allowlist, and a
+  foreground service's process state should be exempt; `adb shell dumpsys deviceidle
+  force-idle` and a logcat of the next tick on a real device are what settle it.
+
 ## Not yet implemented: navigation
 
 The protocol keys, the watch's turn-arrow glyphs, the warnings row's priority resolution and
@@ -260,7 +298,10 @@ When adding it:
 
 | Permission | Why |
 | --- | --- |
-| `READ_CALENDAR` | Runtime. The only data source. |
+| `READ_CALENDAR` | Runtime. The calendar source. |
+| `INTERNET` | Normal. The forecast fetch, and nothing else. |
+| `ACCESS_COARSE_LOCATION` | Runtime, asked only when weather is switched on. |
+| `ACCESS_BACKGROUND_LOCATION` | Runtime (API 29+), asked separately — the fetch runs with the screen off. |
 | `REQUEST_COMPANION_RUN_IN_BACKGROUND` | Normal. The preferred host. |
 | `REQUEST_OBSERVE_COMPANION_DEVICE_PRESENCE` | Normal. Lets us ask to be bound on presence. |
 | `REQUEST_COMPANION_START_FOREGROUND_SERVICES_FROM_BACKGROUND` | Normal. Escape hatch to the fallback host. |

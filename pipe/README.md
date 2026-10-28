@@ -83,7 +83,9 @@ different.
 | `CalendarSource` | Queries `CalendarContract.Instances` over `[now − 3 h, now + 11 h]`. |
 | `CalendarWatcher` | `ContentObserver` for local edits, `ACTION_PROVIDER_CHANGED` for syncs landing from the server. |
 | `PhoneBattery` | `ACTION_BATTERY_CHANGED`, filtered to whole-percent changes. |
-| `EventBlob` / `EventDiff` | Pure. The wire format and the scan diff. |
+| `WeatherSource` / `WeatherPrefs` | Opt-in. Coarse location and an Open-Meteo fetch, off the main thread, on the tick. |
+| `HazardPolicy` / `WxHolder` / `WxSchedule` | Pure. What counts as severe, what to send when a fetch fails, and when one is due. |
+| `EventBlob` / `EventDiff` / `WxBlob` | Pure. The wire formats and the scan diff. |
 | `PebbleSender` | Debounce, coalesce, dedup, chunk, heartbeat. |
 | `BootReceiver` | Re-establishes the host after a reboot or an app update. |
 

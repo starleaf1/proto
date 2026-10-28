@@ -23,8 +23,10 @@ companion that feeds them both:
 The two faces are independent apps with their own UUIDs, built and installed separately.
 They share the protocol and a design vocabulary — an appointment is a band, a task is a
 blunt wedge, a running thing is twice the depth of an upcoming one, red is spent on now
-— and no code that knows about pixels. The three modules that do not (`events`, `wire`,
-`wbatt`) exist in both by copy.
+— and no code that knows about pixels, bar one file. The modules that do not (`events`,
+`wire`, `wbatt`, `wx`) exist in both by copy, and so does `wxglyph`, which draws the
+weather icons — bitmaps both faces carry under the same names — so neither face can draw
+them its own way.
 
 The dividing line: **the phone decides meaning, the watch decides pixels.** The
 companion resolves which entries exist, when they start, how long they run, and
@@ -103,7 +105,7 @@ and those are never gated on anything.
 
 ### `watchface-digital/` — the left-edge timeline
 
-One window, one layer, one update proc, split across seven small modules.
+One window, one layer, one update proc, split across nine small modules.
 
 | File | Owns |
 | --- | --- |
@@ -111,10 +113,12 @@ One window, one layer, one update proc, split across seven small modules.
 | `geometry.{c,h}` | The track, and the vertical layout. |
 | `theme.h` | The whole palette and the four system-font choices. |
 | `events.{c,h}` | The event table, the live window, the linger rules, and which entry the countdown should show. |
-| `strip.{c,h}` | Bands, notches, markers, the pointer. |
+| `strip.{c,h}` | Bands, notches, markers, the pointer, and weather glyphs in the hour-label lane. |
 | `slots.{c,h}` | The three conditional rows, and every glyph. |
 | `wire.{c,h}` | The AppMessage inbox and the two watchdogs. |
 | `wbatt.{c,h}` | The watch's own hours-remaining estimate. |
+| `wx.{c,h}` | The weather table, its persistence, and which alert the slot shows. |
+| `wxglyph.{c,h}` | The weather icons, 12 px bitmaps, plus a drawn mark for ice and the unknown. |
 
 **The track** is the one abstraction the renderer needs. `track_at(lo, u)` maps a
 position in the visible window — seconds from its top — to a point on the boundary plus
@@ -180,15 +184,16 @@ One window, one layer, one update proc, split across the same shape of module se
 | Module | Owns |
 | --- | --- |
 | `proto.c` | Lifecycle, service handlers, paint order, the demo seed. |
-| `dial.{c,h}` | The rail, the bands, the wedges, the ticks and the hands. |
+| `dial.{c,h}` | The rail, the bands, the wedges, the ticks, the weather glyphs and the hands. |
 | `geometry.{c,h}` | The radial ladder, the angle mapping, the disc's rows. |
 | `theme.h` | The palette and the two system-font choices. |
 | `events.{c,h}` | The event table, the live window, linger rules, countdown choice. |
 | `slots.{c,h}` | The countdown and the two notification pairs, and every glyph. |
 | `wire.{c,h}` | The AppMessage inbox and the two watchdogs. |
 | `wbatt.{c,h}` | The watch's own hours-remaining estimate. |
+| `wx.{c,h}` / `wxglyph.{c,h}` | The weather table, and the weather icons. |
 
-`events`, `wire` and `wbatt` are the digital face's files, copied. They carry no
+`events`, `wire`, `wbatt`, `wx` and `wxglyph` are the digital face's files, copied. They carry no
 rendering knowledge, and they only *read* the window constants rather than defining
 them — which is what lets the two windows differ without the copies drifting. It is
 1 h and 11 h here; there it is 1 h and 3 h on the rectangles and 1.5 h and 3.5 h on
@@ -249,7 +254,9 @@ Kotlin + Jetpack Compose, `namespace link.dendritik.proto.pipe`.
 | `CalendarChoice` / `CalendarPrefs` | Pure: which calendars are sent. And where that choice is kept, which the engine listens to. |
 | `CalendarWatcher` | `ContentObserver` plus `ACTION_PROVIDER_CHANGED`. |
 | `PhoneBattery` | `ACTION_BATTERY_CHANGED`, filtered to whole-percent changes. |
-| `EventBlob` / `EventDiff` | Pure. Packing and diffing, covered by JVM unit tests. |
+| `WeatherSource` | Opt-in. Coarse location and an Open-Meteo fetch, off the main thread, on the tick. |
+| `HazardPolicy` / `WxHolder` | Pure. What counts as severe, and what to send when a fetch fails. |
+| `EventBlob` / `EventDiff` / `WxBlob` | Pure. Packing and diffing, covered by JVM unit tests. |
 | `PebbleSender` | Debounce, coalesce, dedup, chunk, and the heartbeat the tick owes. |
 | `BootReceiver` | Restarts the service after a reboot. |
 | `MainActivity` | The three grants the hosts cannot get themselves, the pairing dialog, the calendar choice, the diagnostics and the manual re-sync. |
@@ -378,4 +385,4 @@ Each watchface builds with the Pebble SDK (`waf` via the `pebble` CLI), from its
 directory and with its own UUID; output goes to `watchface-*/build/`, which is generated
 and gitignored. `pipe/` builds with Gradle (`./gradlew assembleDebug`, JDK 21). Each
 component is self-contained; the only thing all three share is the protocol, and the
-only thing the two faces share beyond it is three presentation-free modules, by copy.
+only thing the two faces share beyond it is a handful of modules, by copy.

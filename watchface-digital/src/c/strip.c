@@ -2,6 +2,8 @@
 #include "events.h"
 #include "slots.h"
 #include "theme.h"
+#include "wx.h"
+#include "wxglyph.h"
 #include <string.h>
 
 // ---------------------------------------------------------------------------
@@ -63,6 +65,12 @@ static int   s_pt_n;
 typedef struct { int32_t u; uint8_t hh; } Hour;
 static Hour s_hours[STRIP_SPAN_MIN / 60 + 2];
 static int  s_hour_n;
+
+// Severe weather on the strip: where each glyph lands, resolved before the labels draw,
+// because a label under a glyph is the one that gives way.
+static int32_t s_wx_u[WX_MAX];
+static uint8_t s_wx_hz[WX_MAX];
+static int     s_wx_n;
 
 // A band this thin would otherwise vanish. Three minutes is about two pixels on
 // flint, so this only ever rescues something shorter than that.
@@ -270,6 +278,88 @@ static bool notch_inverts(int32_t u) {
 //
 // `label_x` is a depth along the ray, the same way the markers' depths are, so the lane
 // is simply a vertical column beside the strip.
+// Where a weather icon goes, for an onset at u: level with it on the track, and on the
+// side of the strip that has room.
+//
+// On gabbro that is outboard — left of the track, past the bands and markers that stand
+// there too (MARK_DIR), a margin clear of the deepest of them. The strip stands left of
+// centre there by exactly as much as the clock needs, so the glass to its left is empty,
+// and the icon costs neither the clock nor an hour label anything. It is further out
+// than the markers rather than among them because it is a different reading: weather,
+// not the calendar, and a glyph standing in the calendar's lane would read as an entry.
+//
+// On the rectangles the strip is hard against the screen edge and there is no outboard,
+// so the icon takes the hour labels' lane, the one column inboard of the track it can
+// stand in without costing the content column a pixel, and the label it lands on gives
+// way. The gap past the labels was measured first — seven pixels on flint — against an
+// icon that needs twelve, and widening it would move the clock.
+static GPoint wx_center(const Layout *lo, int32_t u) {
+  Track tr = track_at(lo, u);
+#ifdef PBL_ROUND
+  return step_in(tr.p, tr.a, -(lo->mark_reach + lo->margin + WX_ICON_PX / 2));
+#else
+  return step_in(tr.p, tr.a, lo->label_x + lo->label_w / 2);
+#endif
+}
+
+// Where each upcoming alert's icon goes: at its onset. See wx_center.
+//
+// Every alert ahead within the strip's reach draws, the imminent one included — the
+// slot shows that one too, but nothing on this face covers the lane the way the analog
+// face's hour hand covers its dial, so there is no reason to take it off the timeline.
+// Except on flint, where the wedge is drawn last of all and covers the lane for twenty
+// minutes either side of now: an onset inside that reach is held just past the wedge.
+// It moves by at most that much, and it moves toward later, the direction the reader is
+// already looking.
+//
+// Two closer than a glyph's own height cannot draw apart; the earlier keeps its place.
+static void build_wx(const Layout *lo, time_t now) {
+  s_wx_n = 0;
+  const WxAlert *up[WX_MAX];
+  int n = wx_upcoming(now, STRIP_AHEAD_S, false, up, WX_MAX);
+  int16_t side = WX_ICON_PX;
+  int32_t edge = u_of_px(lo, side / 2 + 2);
+  int32_t gap = u_of_px(lo, side + 4);
+
+  for (int i = 0; i < n; i++) {
+    int32_t u = u_of_time(up[i]->onset, now);
+#ifndef PBL_COLOR
+    int32_t clear = STRIP_BACK_S + u_of_px(lo, pointer_half(lo) + side / 2 + 1);
+    if (u < clear) u = clear;
+#endif
+    if (u > STRIP_SPAN_S - edge) continue;
+    if (s_wx_n > 0 && u - s_wx_u[s_wx_n - 1] < gap) continue;
+
+#ifdef PBL_ROUND
+    // The strip runs off the glass at both ends; a glyph the glass would cut is a
+    // fragment that reads as some other shape, so it waits until it is fully on.
+    GPoint c = wx_center(lo, u);
+    int32_t dx = (c.x < lo->center.x ? lo->center.x - c.x : c.x - lo->center.x) + side / 2;
+    int32_t dy = (c.y < lo->center.y ? lo->center.y - c.y : c.y - lo->center.y) + side / 2;
+    if (dx * dx + dy * dy > (int32_t)lo->radius * lo->radius) continue;
+#endif
+    s_wx_u[s_wx_n] = u;
+    s_wx_hz[s_wx_n] = up[i]->hazard;
+    s_wx_n++;
+  }
+}
+
+// In the label lane, over the markers and the bands and under nothing — the same terms
+// as an hour label, and for the same reason: it knocks out its own footprint, so
+// whatever it may cover has to be down already. Outboard on gabbro there is nothing to
+// knock out.
+static void draw_wx(GContext *ctx, const Layout *lo) {
+  int16_t side = WX_ICON_PX;
+  for (int i = 0; i < s_wx_n; i++) {
+    GPoint c = wx_center(lo, s_wx_u[i]);
+    GRect box = GRect(c.x - side / 2, c.y - side / 2, side, side);
+#ifndef PBL_ROUND
+    knock_out(ctx, GRect(box.origin.x - 2, box.origin.y - 2, side + 4, side + 4));
+#endif
+    wx_glyph(ctx, box, s_wx_hz[i]);
+  }
+}
+
 static void format_hour(char *buf, size_t n, int hh) {
   if (clock_is_24h_style()) {
     snprintf(buf, n, "%02d", hh);
@@ -311,6 +401,16 @@ static void draw_hour_label(GContext *ctx, const Layout *lo, GFont font,
   // dropping this one loses a repetition.
   int32_t near = u_of_px(lo, pointer_half(lo) + ts.h / 2 + 1);
   if (u > STRIP_BACK_S - near && u < STRIP_BACK_S + near) return;
+#endif
+
+#ifndef PBL_ROUND
+  // And drop one a weather icon lands on. The icon is in this lane and is the rarer
+  // reading, and the hours either side of it still carry their numbers. Not on gabbro,
+  // where the icon is on the other side of the track.
+  int32_t wx_near = u_of_px(lo, WX_ICON_PX / 2 + ts.h / 2 + 1);
+  for (int i = 0; i < s_wx_n; i++) {
+    if (u > s_wx_u[i] - wx_near && u < s_wx_u[i] + wx_near) return;
+  }
 #endif
 
   Track tr = track_at(lo, u);
@@ -364,23 +464,9 @@ static void draw_labels(GContext *ctx, const Layout *lo, GFont font) {
 // notches from the "now" mark. This pass only records where they are; draw_labels()
 // puts them on the screen once everything they have to sit over is down.
 static void draw_notches(GContext *ctx, const Layout *lo, time_t now) {
-  // A ninetieth of the radius is 0, 1 and 1 on the three displays, so stroke_px() put
-  // every quarter-hour graduation on a single pixel — on gabbro that is a hairline on a
-  // 260 px screen beside a five-pixel hour notch, and the ruler's pitch stopped being
-  // legible at all between the numbered notches. A fortieth is still 1 on flint and
-  // emery, where one pixel is the right weight and the only other option is three, and
-  // it reaches three on gabbro, which is the display that has the room for it.
-  int16_t min_w = stroke_px(lo->radius / 40);
-
-  // The hour notch is thicker, and "thicker" is a ratio, not a divisor of its own. A
-  // twenty-fourth of the radius gave 3/3/5, which was two and three times the minute
-  // notch on flint and emery and — once the minute notch on gabbro grew to three — barely
-  // more than it there. Measured on gabbro, the ruler lost its structure entirely: every
-  // graduation looked the same and only the numbers said which were hours. Twice its
-  // neighbour is the floor, and stroke_px() takes it to the next odd width up.
-  int16_t hour_w = stroke_px(lo->radius / 24);
-  if (hour_w < 3) hour_w = 3;
-  if (hour_w < 2 * min_w) hour_w = stroke_px(2 * min_w + 1);
+  // Both widths are layout_compute's — see there for how they were arrived at.
+  int16_t min_w = lo->min_w;
+  int16_t hour_w = lo->hour_w;
 
   time_t start = now - STRIP_BACK_S;
   struct tm lt = *localtime(&start);
@@ -409,9 +495,16 @@ static void draw_notches(GContext *ctx, const Layout *lo, time_t now) {
     int32_t u = (int32_t)(t - start);
     if (u > STRIP_SPAN_S) break;
 
-    graphics_context_set_stroke_width(ctx, (m == 0) ? hour_w : min_w);
+    int16_t w = (m == 0) ? hour_w : min_w;
+    graphics_context_set_stroke_width(ctx, w);
 
+    // On gabbro the marks stand outboard, so a notch has to start *at* the track rather
+    // than straddle it: a thick line's round cap runs half its width past its endpoint,
+    // and centred on the track an hour notch put a black nub three pixels into every band
+    // and wedge it crossed. Both ends move in by the cap, so the notch keeps its length
+    // and the rule's `rule_len` covers the inner cap.
     Track tr = track_at(lo, u);
+    if (MARK_DIR < 0) tr.p = step_in(tr.p, tr.a, w / 2);
     GPoint inner = step_in(tr.p, tr.a, lo->notch_len);
 
     if (notch_inverts(u)) {
@@ -459,7 +552,8 @@ static void draw_markers(GContext *ctx, const Layout *lo) {
 
     // Depth carries grouping — independent of urgency, and it survives having no
     // colour. Both depths reach past the notch inner-ends, so a marker always
-    // reads as a spike out of the ruler rather than as a fatter tick.
+    // reads as a spike out of the ruler rather than as a fatter tick. On gabbro the
+    // spike is outboard, on the other side of the track from the notches (MARK_DIR).
     int16_t depth = lo->notch_len
                   * (grouped ? MARKER_GROUP_PCT : MARKER_DEPTH_PCT) / 100;
 
@@ -547,11 +641,14 @@ void strip_draw_now(GContext *ctx, const Layout *lo) {
   // The width is still a stroke width, because it is still what it was chosen to be — a
   // thickness across the track, wider than an hour notch — and w/2 either side of now is
   // the same w pixels the stroke drew.
+  //
+  // On gabbro the markers stand outboard of the track, so the rule straddles it: out over
+  // the deepest marker and in past the notches — see `rule_out` in layout_compute.
   int16_t w = stroke_px(lo->radius / RULE_W_DIV);
   if (w < 3) w = 3;
   int32_t half = u_of_px(lo, w / 2);
-  fill_track_band(ctx, lo, STRIP_BACK_S - half, STRIP_BACK_S + half,
-                  lo->rule_len, COL_INDEX);
+  fill_track_span(ctx, lo, STRIP_BACK_S - half, STRIP_BACK_S + half,
+                  -lo->rule_out, lo->rule_len, COL_INDEX);
 #else
   Track t = track_at(lo, STRIP_BACK_S);
   int16_t phw = pointer_half(lo);
@@ -581,6 +678,7 @@ void strip_draw_now(GContext *ctx, const Layout *lo) {
 void strip_draw(GContext *ctx, const Layout *lo, time_t now, GFont tick) {
   build_coverage(now);
   build_points(lo, now);
+  build_wx(lo, now);
   draw_bands(ctx, lo);
 #ifdef PBL_COLOR
   draw_markers(ctx, lo);
@@ -590,4 +688,5 @@ void strip_draw(GContext *ctx, const Layout *lo, time_t now, GFont tick) {
   draw_markers(ctx, lo);
 #endif
   draw_labels(ctx, lo, tick);
+  draw_wx(ctx, lo);
 }

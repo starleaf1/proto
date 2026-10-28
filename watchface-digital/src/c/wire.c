@@ -1,5 +1,6 @@
 #include "wire.h"
 #include "events.h"
+#include "wx.h"
 
 // Companion liveness watchdog. The phone declares its own cadence in Heartbeat
 // (seconds until it next expects to check in) rather than the two sides agreeing
@@ -36,8 +37,13 @@
 #define CAL_OP_UPSERT 0
 #define CAL_OP_REMOVE 1
 
+#define WX_VERSION    1
+#define WX_HEADER     2
+#define WX_RECORD     8
+
 // The inbox has to hold a full sync message: 6 header bytes plus 12 per record,
-// and the companion caps a message at 24 records. An oversized AppMessage is not
+// and the companion caps a message at 24 records, with the weather blob riding
+// along in the same message — 397 bytes in all, see ../../docs/protocol.md. An oversized AppMessage is not
 // truncated, it fails to transmit entirely, so this is sized with headroom. The
 // outbox is vestigial — the watch never sends app data.
 #define INBOX_SIZE  512
@@ -177,6 +183,34 @@ static bool handle_calendar(DictionaryIterator *iter) {
   return !events_same_as(s_before);
 }
 
+// Weather is replaced whole whenever its key is present, and left alone when it
+// is not: an absent key is a companion with no forecast to offer, which is not
+// the same as a forecast that came back clear — that one is an empty blob.
+static bool handle_wx(DictionaryIterator *iter) {
+  Tuple *b = dict_find(iter, MESSAGE_KEY_WxAlerts);
+  if (!b || b->type != TUPLE_BYTE_ARRAY || b->length < WX_HEADER) return false;
+  const uint8_t *p = b->value->data;
+  // A version this watch does not understand is ignored rather than misread, and
+  // what it held stays until it ends.
+  if (p[0] != WX_VERSION) return false;
+
+  static WxAlert s_before[WX_MAX];
+  memcpy(s_before, wx_table(), sizeof s_before);
+  wx_clear();
+
+  int count = p[1];
+  int fits = (b->length - WX_HEADER) / WX_RECORD;
+  if (count > fits) count = fits;
+  for (int i = 0; i < count; i++) {
+    const uint8_t *r = p + WX_HEADER + i * WX_RECORD;
+    uint8_t  hazard = r[0];                       // r[1] is reserved
+    int32_t  onset  = (int32_t)rd_u32(r + 2);     // absolute UTC seconds
+    uint16_t dur    = rd_u16(r + 6);
+    wx_add((time_t)onset, dur, hazard);           // folds what it does not know
+  }
+  return !wx_same_as(s_before);
+}
+
 static bool handle_nav(DictionaryIterator *iter) {
   Tuple *m = dict_find(iter, MESSAGE_KEY_NavManeuver);
   if (!m) return false;
@@ -200,6 +234,7 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
   bool dirty = false;
 
   if (handle_calendar(iter)) dirty = true;
+  if (handle_wx(iter)) dirty = true;
   if (handle_nav(iter)) dirty = true;
 
   Tuple *pb = dict_find(iter, MESSAGE_KEY_PhoneBattery);

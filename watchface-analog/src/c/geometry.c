@@ -1,4 +1,5 @@
 #include "geometry.h"
+#include "wxglyph.h"
 #include "digits.h"
 #include "theme.h"
 
@@ -498,6 +499,19 @@ Layout layout_compute(GRect bounds, GFont date_font, GFont slot_font, int16_t ce
     lo.nav_box  = GRect(bx, by, nw, bh);
     lo.warn_box = GRect(bx + nw, by, bw - nw, bh);
   }
+
+  // The icon is its bitmap's own twelve pixels on every display — pixel art does not
+  // survive scaling — halfway between the plate's rim and the ticks' outer end. Sizing
+  // it to the lane was tried first: twelve pixels on flint, but twenty-six on gabbro,
+  // where a drawn shape that large read as a complication rather than a mark and did
+  // not read as weather at all.
+  //
+  // Outward its halo overlaps the four major ticks, whose inner ends come within a few
+  // pixels of r_wx on all three displays, and cuts them: an onset on the hour is the
+  // common case, and there the icon is the reading. Inward it costs nothing — the plate
+  // is painted after and covers it — and on flint the lane is exactly wide enough.
+  lo.r_wx = (lo.plate_r + lo.tick_out) / 2;
+  lo.wx_side = WX_ICON_PX;
 
   return lo;
 }

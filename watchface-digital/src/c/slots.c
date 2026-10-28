@@ -3,6 +3,8 @@
 #include "theme.h"
 #include "wbatt.h"
 #include "wire.h"
+#include "wx.h"
+#include "wxglyph.h"
 #include <stdio.h>
 
 // ---------------------------------------------------------------------------
@@ -399,8 +401,83 @@ void slots_draw_count(GContext *ctx, const Layout *lo, GFont font, time_t now) {
                      GTextAlignmentLeft, NULL);
 }
 
-void slots_draw_nav(GContext *ctx, const Layout *lo, GFont font) {
-  if (!wire_nav_active()) return;
+// ---------------------------------------------------------------------------
+// Severe weather
+//
+// From WX_NEAR_S before its onset until it ends: plain ink counting down to the
+// onset, then the countdown's own filled box counting down to the end — a running
+// thing is the filled one, here as on the strip.
+//
+// It ranks below the maneuver and above both batteries. A turn is wrong within the
+// minute, a storm within the hour, a battery all day. The rows here are stacked rather
+// than sharing a strip, so the order needs one rule and no resolver: nav's row carries
+// the weather while there is no turn, and the bottom row carries it when there is.
+// It stays while the companion is gone — like the countdown, it is timestamped and
+// ends on its own, and the bottom row is the one saying the companion is gone.
+// ---------------------------------------------------------------------------
+
+static void fmt_wx(char *buf, size_t n, int32_t seconds) {
+  // hh:mm, like a clock. Minutes rounded up, so an onset a few seconds away reads
+  // "00:01" and never "00:00"; clamped at 99:59 so the string can never grow.
+  int32_t mins = (seconds + 59) / 60;
+  if (mins > 99 * 60 + 59) mins = 99 * 60 + 59;
+  snprintf(buf, n, "%02d:%02d", (int)(mins / 60), (int)(mins % 60));
+}
+
+static void draw_wx_reading(GContext *ctx, GRect row, GFont font, const WxPick *p) {
+  char text[12];   // sized past "99:59" to keep snprintf quiet
+  fmt_wx(text, sizeof text, p->seconds);
+
+  GRect gbox, tbox;
+  slot_layout(row, font, text, &gbox, &tbox);
+  GSize ts = graphics_text_layout_get_content_size(text, font, row,
+                                                   GTextOverflowModeFill,
+                                                   GTextAlignmentLeft);
+  // The countdown's geometry exactly, so a running storm's box and a running meeting's
+  // are the same shape: inset by the pad, glyph centred on the text's ink.
+  int16_t pad = COUNT_PAD(ts.h);
+  gbox.origin.x += pad;
+  tbox.origin.x += pad;
+  int16_t ink_bot = tbox.origin.y + ts.h;
+  int16_t ink_mid = (ink_bot - ts.h * 5 / 8 + ink_bot) / 2;
+  gbox.origin.y = ink_mid - gbox.size.h / 2;
+
+  // Black, not the timeline's colours: the icon carries the hazard, and the number
+  // beside it is a time, inked like every other time on the face.
+  GColor ink = COL_INK;
+  if (p->running) {
+    int16_t x0 = gbox.origin.x - pad;
+    int16_t x1 = tbox.origin.x + ts.w + pad;
+    GRect fill = GRect(x0, gbox.origin.y - pad, x1 - x0, gbox.size.h + 2 * pad);
+    graphics_context_set_fill_color(ctx, COL_INK);
+    graphics_fill_rect(ctx, fill, pad, GCornersAll);
+    ink = COL_BG;
+  } else {
+    slot_knock_out(ctx, gbox, tbox);
+  }
+
+
+  // The icons are bitmaps with their own inks, black on flint, so on the filled box
+  // they would vanish into it. They sit on a tile of background instead, a pixel
+  // proud of the icon: the box still says "running", and the icon still reads.
+  if (p->running) {
+    GPoint c = grect_center_point(&gbox);
+    graphics_context_set_fill_color(ctx, COL_BG);
+    graphics_fill_rect(ctx, GRect(c.x - WX_ICON_PX / 2 - 1, c.y - WX_ICON_PX / 2 - 1,
+                                  WX_ICON_PX + 2, WX_ICON_PX + 2), 2, GCornersAll);
+  }
+  wx_glyph(ctx, gbox, p->alert->hazard);
+  graphics_context_set_text_color(ctx, ink);
+  graphics_draw_text(ctx, text, font, tbox, GTextOverflowModeFill,
+                     GTextAlignmentLeft, NULL);
+}
+
+void slots_draw_nav(GContext *ctx, const Layout *lo, GFont font, time_t now) {
+  if (!wire_nav_active()) {
+    WxPick wp = wx_pick_slot(now);
+    if (wp.alert) draw_wx_reading(ctx, lo->nav_box, font, &wp);
+    return;
+  }
 
   char text[16] = "";
   fmt_distance(text, sizeof text, wire_nav_distance(), wire_nav_unit());
@@ -421,7 +498,17 @@ void slots_draw_nav(GContext *ctx, const Layout *lo, GFont font) {
 // phone battery therefore suppresses the watch's own warning, which is deliberate:
 // one row, one thing, and the phone is the half of the system that this face
 // depends on and cannot see for itself.
-void slots_draw_warn(GContext *ctx, const Layout *lo, GFont font) {
+void slots_draw_warn(GContext *ctx, const Layout *lo, GFont font, time_t now) {
+  // Weather, when nav has its row: below the companion-down alert, above both
+  // batteries.
+  if (wire_companion_alive() && wire_nav_active()) {
+    WxPick wp = wx_pick_slot(now);
+    if (wp.alert) {
+      draw_wx_reading(ctx, lo->warn_box, font, &wp);
+      return;
+    }
+  }
+
   char text[16] = "";
   GColor ink = COL_INK;
   enum { T_NONE, T_DOWN, T_PHONE, T_WATCH } which = T_NONE;

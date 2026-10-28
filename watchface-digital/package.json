@@ -27,7 +27,8 @@
       "NavManeuver",
       "NavDistance",
       "NavUnit",
-      "PhoneBattery"
+      "PhoneBattery",
+      "WxAlerts"
     ],
     "resources": {
       "media": [
@@ -45,6 +46,125 @@
           "type": "bitmap",
           "name": "MENU_ICON",
           "file": "images/menu_icon_color.png",
+          "targetPlatforms": [
+            "emery",
+            "gabbro"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_RAIN",
+          "file": "images/pebble_weather_icons/bw/rain_bw.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_RAIN",
+          "file": "images/pebble_weather_icons/color/rain_color.png",
+          "targetPlatforms": [
+            "emery",
+            "gabbro"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_THUNDER",
+          "file": "images/pebble_weather_icons/bw/thunderstorm_bw.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_THUNDER",
+          "file": "images/pebble_weather_icons/color/thunderstorm_color.png",
+          "targetPlatforms": [
+            "emery",
+            "gabbro"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_SNOW",
+          "file": "images/pebble_weather_icons/bw/snow_bw.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_SNOW",
+          "file": "images/pebble_weather_icons/color/snow_color.png",
+          "targetPlatforms": [
+            "emery",
+            "gabbro"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_HEAT",
+          "file": "images/pebble_weather_icons/bw/heat_bw.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_HEAT",
+          "file": "images/pebble_weather_icons/color/heat_color.png",
+          "targetPlatforms": [
+            "emery",
+            "gabbro"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_WIND",
+          "file": "images/pebble_weather_icons/bw/wind_bw.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_WIND",
+          "file": "images/pebble_weather_icons/color/wind_color.png",
+          "targetPlatforms": [
+            "emery",
+            "gabbro"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_HAIL",
+          "file": "images/pebble_weather_icons/bw/hail_bw.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_HAIL",
+          "file": "images/pebble_weather_icons/color/hail_color.png",
+          "targetPlatforms": [
+            "emery",
+            "gabbro"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_OTHER",
+          "file": "images/pebble_weather_icons/bw/other_severe_bw.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_OTHER",
+          "file": "images/pebble_weather_icons/color/other_severe_color.png",
           "targetPlatforms": [
             "emery",
             "gabbro"

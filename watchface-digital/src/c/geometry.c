@@ -75,19 +75,32 @@ GPoint step_side(GPoint p, int32_t a, int32_t d) {
 // line.
 //
 // A filled rect, ending on the ray, so a band's end lines up with a notch at the same `u`.
+//
+// On gabbro the band is mirrored outboard, BAND_OUT_PX and all: the pixel past the track
+// is then the notches' first column, where they draw over it, and the wedge's cap below
+// still lands on exactly the band's pixels because it comes through here too.
 void fill_track_band(GContext *ctx, const Layout *lo, int32_t u0, int32_t u1,
                      int16_t depth, GColor col) {
+  if (depth < 1) return;
+  if (MARK_DIR > 0) {
+    fill_track_span(ctx, lo, u0, u1, -BAND_OUT_PX, depth, col);
+  } else {
+    fill_track_span(ctx, lo, u0, u1, -depth, BAND_OUT_PX, col);
+  }
+}
+
+void fill_track_span(GContext *ctx, const Layout *lo, int32_t u0, int32_t u1,
+                     int16_t d0, int16_t d1, GColor col) {
   if (u0 < 0) u0 = 0;
   if (u1 > STRIP_SPAN_S) u1 = STRIP_SPAN_S;
-  if (u1 < u0 || depth < 1) return;
+  if (u1 < u0 || d1 < d0) return;
 
   graphics_context_set_fill_color(ctx, col);
-  // The +1 is the track's own column: `depth` is measured from it, so the band covers
-  // strip_x - BAND_OUT_PX through strip_x + depth *inclusive*.
+  // The +1 is the track's own column: both depths are measured from it and both ends
+  // are inclusive.
   int16_t y0 = track_at(lo, u0).p.y;
   int16_t y1 = track_at(lo, u1).p.y;
-  graphics_fill_rect(ctx, GRect(lo->strip_x - BAND_OUT_PX, y0,
-                                depth + BAND_OUT_PX + 1, y1 - y0 + 1),
+  graphics_fill_rect(ctx, GRect(lo->strip_x + d0, y0, d1 - d0 + 1, y1 - y0 + 1),
                      0, GCornerNone);
 }
 
@@ -229,7 +242,7 @@ void draw_track_wedge(GContext *ctx, const Layout *lo, int32_t u,
   if (tip_half > half_len) tip_half = half_len;
 
   Track t = track_at(lo, u);
-  GPoint tip = step_in(t.p, t.a, depth);
+  GPoint tip = step_in(t.p, t.a, MARK_DIR * depth);
   GPoint pts[4] = {
     step_side(t.p, t.a,  half_len),
     step_side(tip,  t.a,  tip_half),
@@ -314,7 +327,7 @@ static void place_strip(Layout *lo, int16_t x) {
 static int16_t clock_top(const Layout *lo, int16_t num_h, int16_t span_top) {
   Track ptr = track_at(lo, STRIP_BACK_S);
 #ifdef PBL_COLOR
-  int16_t p_mid = lo->rule_len / 2;
+  int16_t p_mid = (lo->rule_len - lo->rule_out) / 2;
 #else
   int16_t p_mid = lo->ptr_tip + lo->notch_len * POINTER_LEN_PCT / 100 / 2;
 #endif
@@ -336,6 +349,28 @@ Layout layout_compute(GRect bounds, int16_t num_cell, GFont date_font,
   if (margin < EDGE_MARGIN_MIN) margin = EDGE_MARGIN_MIN;
   lo.margin = margin;
   lo.notch_len = lo.radius / 9;
+  lo.mark_reach = lo.notch_len * MARKER_GROUP_PCT / 100;
+
+  // The notches' stroke widths. Here rather than in draw_notches because gabbro's rule
+  // has to clear an hour notch's round cap, which is half its width past its inner end.
+  //
+  // A ninetieth of the radius is 0, 1 and 1 on the three displays, so stroke_px() put
+  // every quarter-hour graduation on a single pixel — on gabbro that is a hairline on a
+  // 260 px screen beside a five-pixel hour notch, and the ruler's pitch stopped being
+  // legible at all between the numbered notches. A fortieth is still 1 on flint and
+  // emery, where one pixel is the right weight and the only other option is three, and
+  // it reaches three on gabbro, which is the display that has the room for it.
+  lo.min_w = stroke_px(lo.radius / 40);
+
+  // The hour notch is thicker, and "thicker" is a ratio, not a divisor of its own. A
+  // twenty-fourth of the radius gave 3/3/5, which was two and three times the minute
+  // notch on flint and emery and — once the minute notch on gabbro grew to three — barely
+  // more than it there. Measured on gabbro, the ruler lost its structure entirely: every
+  // graduation looked the same and only the numbers said which were hours. Twice its
+  // neighbour is the floor, and stroke_px() takes it to the next odd width up.
+  lo.hour_w = stroke_px(lo.radius / 24);
+  if (lo.hour_w < 3) lo.hour_w = 3;
+  if (lo.hour_w < 2 * lo.min_w) lo.hour_w = stroke_px(2 * lo.min_w + 1);
 
   // The hour labels' width — measured, not chosen. "00" is the widest an hour ever
   // gets, in 24-hour style or 12; the 12-hour case just centres a narrower glyph in the
@@ -354,7 +389,21 @@ Layout layout_compute(GRect bounds, int16_t num_cell, GFont date_font,
   // The rule strikes through exactly what the strip draws and no further, and a merged
   // marker is the deepest of that. The labels then start past all of it, so nothing is
   // ever over or under them.
-  lo.rule_len = lo.notch_len * MARKER_GROUP_PCT / 100;
+  //
+  // On gabbro the markers are outboard, so what the rule strikes through splits across
+  // the track: out over the markers, and in only over the notches, as far as an hour
+  // notch's round cap reaches — which is a whole width past notch_len, the notches there
+  // being moved in by their cap so as not to poke back into the bands (draw_notches). The
+  // labels come in with it — the column the markers used to need is no longer on this
+  // side — so `zone` shrinks, and the strip steps less far left of centre to fit the
+  // clock.
+#ifdef PBL_ROUND
+  lo.rule_out = lo.mark_reach;
+  lo.rule_len = lo.notch_len + lo.hour_w;
+#else
+  lo.rule_out = BAND_OUT_PX;
+  lo.rule_len = lo.mark_reach;
+#endif
   lo.label_x = lo.rule_len + margin;
   lo.zone = lo.label_x + lo.label_w + margin;
 #else

@@ -40,6 +40,16 @@ object Protocol {
     const val KEY_NAV_UNIT = 10005
     const val KEY_PHONE_BATTERY = 10006
 
+    /**
+     * Severe weather the forecast says is coming: a blob of [Hazard]s with an onset and a
+     * duration each, replaced whole every time it is sent. Its own key rather than a
+     * third `kind` in [KEY_CAL_EVENTS]: a calendar flush would wipe it, it would spend
+     * the calendar's record cap, and a face built before it would fold an unknown kind
+     * to an appointment and draw a storm as a meeting. An unknown key is ignored. See
+     * [WxBlob][link.dendritik.proto.pipe.pebble.WxBlob].
+     */
+    const val KEY_WX_ALERTS = 10007
+
     /** First message of a fresh sync: the watch drops everything it holds. */
     const val CAL_FLUSH = 0x1
 
@@ -48,7 +58,7 @@ object Protocol {
 
     /**
      * Seconds until we next expect to check in, sent with every message so the watch
-     * can size its own liveness watchdog (it allows 2.5 of these before it declares
+     * can size its own liveness watchdog (it allows 3 of these before it declares
      * us gone). Two tiers, because staleness is not equally harmful in every state
      * and Android is not equally willing to wake us in every state.
      *
@@ -149,4 +159,22 @@ enum class EventOp(val wire: Int) {
 enum class EventKind(val wire: Int) {
     APPOINTMENT(0),
     TASK(1),
+}
+
+/**
+ * A kind of severe weather. The phone decides *that* it is coming — the thresholds are
+ * policy, see [HazardPolicy][link.dendritik.proto.pipe.weather.HazardPolicy] — and the
+ * watch decides what it looks like, so this is an enum and not a glyph.
+ *
+ * [wire] values are the protocol's, not the ordinals — do not renumber. 0 is never
+ * sent. A watch built before a value existed draws it as a generic mark rather than
+ * dropping it, so a new hazard can be added here without a watchface update.
+ */
+enum class Hazard(val wire: Int) {
+    THUNDER(1),
+    RAIN(2),
+    SNOW(3),
+    ICE(4),
+    GUSTS(5),
+    HEAT(6),
 }

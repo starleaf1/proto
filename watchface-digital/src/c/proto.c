@@ -7,6 +7,8 @@
 #include "theme.h"
 #include "wbatt.h"
 #include "wire.h"
+#include "wx.h"
+#include "wxglyph.h"
 #include <string.h>
 
 // ---------------------------------------------------------------------------
@@ -101,8 +103,8 @@ static void root_update_proc(Layer *layer, GContext *ctx) {
                      GTextOverflowModeFill, ROW_ALIGN, NULL);
 
   slots_draw_count(ctx, &lo, s_slot_font, s_now);
-  slots_draw_nav(ctx, &lo, s_slot_font);
-  slots_draw_warn(ctx, &lo, s_slot_font);
+  slots_draw_nav(ctx, &lo, s_slot_font, s_now);
+  slots_draw_warn(ctx, &lo, s_slot_font, s_now);
 
   strip_draw_now(ctx, &lo);   // last: nothing may cover the "now" pointer
 }
@@ -119,6 +121,7 @@ static void tick_handler(struct tm *t, TimeUnits units) {
   // what advances the countdown and retires anything that has aged out. Nothing
   // on this face moves faster than a minute.
   events_gc(s_now);
+  wx_gc(s_now);
   mark_dirty();
 }
 
@@ -156,6 +159,25 @@ static void demo_seed(time_t now) {
   events_upsert(9, now + 630 * 60, 90, EV_APPOINTMENT);  // clips at the analog face's end
   events_upsert(10, now + 655 * 60, 0, EV_TASK);         // just inside the analog horizon
   events_upsert(11, now + 690 * 60, 0, EV_TASK);         // past it: must not draw
+
+  // Weather, the same set as WX_DEMO in tools/send-demo-events.py, replacing
+  // whatever was restored so the set is exactly that one.
+  //
+  // The rain is the one that has to land on a major tick: the next whole hour at
+  // least 45 minutes out whose clock hour is a multiple of three, which is where an
+  // hourly forecast puts an onset one time in three.
+  time_t rain = now + 45 * 60;
+  rain += 3600 - rain % 3600;
+  while (localtime(&rain)->tm_hour % 3) rain += 3600;
+  wx_clear();
+  wx_add(now  +  10 * 60,  50, WX_GUSTS);    // inside WX_NEAR_S: the slot, not the timeline
+  wx_add(rain,             60, WX_RAIN);     // on 12, 3, 6 or 9: the halo cuts the tick
+  wx_add(rain +  75 * 60,  45, WX_ICE);      // a quarter-hour onset, between labels
+  wx_add(now  + 300 * 60, 120, WX_SNOW);
+  wx_add(now  + 480 * 60,  30, WX_THUNDER);  // these two are 20 min apart:
+  wx_add(now  + 500 * 60,  40, WX_GUSTS);    // the later one must not draw
+  wx_add(now  + 630 * 60,  30, WX_HEAT);     // against the seam
+  wx_add(now  + 690 * 60,  60, WX_SNOW);     // past the horizon: must not draw
 }
 #endif
 
@@ -188,6 +210,7 @@ static void init(void) {
   update_buffers();
   events_clear();
   events_load();                 // what was on the strip when we were last closed
+  wx_load();
   wbatt_init();
 #ifdef PROTO_DEMO
   demo_seed(s_now);
@@ -215,6 +238,8 @@ static void deinit(void) {
   // runs on every excursion, not just at the end of the day. Saving here is what
   // puts the strip back the way they left it when they come back.
   events_save();
+  wx_save();
+  wx_glyph_deinit();
   wire_deinit();                 // before window_destroy: its timers repaint
   tick_timer_service_unsubscribe();
   battery_state_service_unsubscribe();

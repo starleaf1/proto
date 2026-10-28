@@ -47,6 +47,14 @@ object PipeStatus {
      */
     var nuronState by mutableStateOf("never read")
 
+    /**
+     * Whether the forecast answered — "ok (2)", "off", "unavailable: no location" — and
+     * how many alerts the last flush carried. The state line is what tells a clear
+     * afternoon from a fetch that has been failing since lunch.
+     */
+    var wxState by mutableStateOf("never fetched")
+    var wxAlertCount by mutableStateOf(0)
+
     /** Which host is holding the engine open. */
     var host by mutableStateOf(Host.FOREGROUND)
 

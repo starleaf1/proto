@@ -15,6 +15,15 @@
          provider has no column for one. -->
     <uses-permission android:name="com.amborjo.questjournal.permission.READ_QUEST_FACTS" />
 
+    <!-- Severe weather, and off until the user switches it on. The forecast is fetched
+         from open-meteo.com for the phone's approximate position, so it needs the
+         network and a coarse fix; background as well, because the fetch rides the
+         periodic tick with the screen off. Coarse only — a forecast grid is kilometres
+         across — and the coordinates are rounded to two decimals before they leave. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+
     <!-- Preferred host (API 31+). Associating the watch lets the system bind
          PipeCompanionService for as long as it is nearby, which holds the process open
          without a notification. All three are normal permissions: no prompt, no runtime

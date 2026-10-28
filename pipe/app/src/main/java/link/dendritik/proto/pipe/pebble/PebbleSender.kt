@@ -16,6 +16,7 @@ import link.dendritik.proto.pipe.calendar.EventFacts
 import link.dendritik.proto.pipe.protocol.EventOp
 import link.dendritik.proto.pipe.protocol.NavState
 import link.dendritik.proto.pipe.protocol.Protocol
+import link.dendritik.proto.pipe.weather.WxAlert
 
 /**
  * Everything that reaches the watch goes through here.
@@ -51,6 +52,9 @@ class PebbleSender(private val context: Context) {
     /** What we believe the watch's event table holds, so a scan can be diffed. */
     private var sentEvents: Map<Int, EventFacts> = emptyMap()
 
+    /** The weather list last sent, or null if none has been since the link came up. */
+    private var sentWx: List<WxAlert>? = null
+
     /** When we last got a message out, so [beat] can tell whether one is owed. */
     private var lastSentAtMs = 0L
 
@@ -78,6 +82,7 @@ class PebbleSender(private val context: Context) {
                     // only correct move is a forced flush; gating that on a comparison
                     // with the table we last sent would be comparing against a phantom.
                     sentEvents = emptyMap()
+                    sentWx = null
                 } else {
                     Log.i(TAG, "watch connected; re-syncing")
                     onWatchConnected?.invoke()
@@ -151,15 +156,23 @@ class PebbleSender(private val context: Context) {
      * manual re-sync, which all send because the watch's table cannot be read back and
      * may have been restored stale across a relaunch.
      *
+     * [wx] rides in the first message as its own key, replacing the watch's weather
+     * whole, or is left out when it is `null` — which the watch reads as "no news" rather
+     * than as a clear sky. A forecast that changed is news on its own, so it can send a
+     * flush with the calendar unchanged; the calendar is restated with it, which costs
+     * the same one message.
+     *
      * Returns whether anything actually reached the watch, so a caller driving the
      * periodic tick knows whether it still owes a [beat].
      */
-    fun syncCalendar(events: List<EventFacts>, force: Boolean): Boolean {
+    fun syncCalendar(events: List<EventFacts>, wx: List<WxAlert>?, force: Boolean): Boolean {
         if (!isWatchConnected()) {
             cancelFastBeat()
             return false
         }
-        if (!force && !EventDiff.changed(sentEvents, events)) return false
+        if (!force && !SyncGate.changed(EventDiff.changed(sentEvents, events), sentWx, wx)) {
+            return false
+        }
 
         val records = events.map { EventBlob.Record(it, EventOp.UPSERT) }
         val chunks = EventBlob.chunk(records)
@@ -172,6 +185,7 @@ class PebbleSender(private val context: Context) {
                 addBytes(Protocol.KEY_CAL_EVENTS, blob)
                 addInt32(Protocol.KEY_CAL_FLAGS, flags)
                 addInt32(Protocol.KEY_HEARTBEAT, period)
+                if (i == 0 && wx != null) addBytes(Protocol.KEY_WX_ALERTS, WxBlob.pack(wx))
             }
             // Bail on the first failure rather than pressing on: the remaining chunks
             // belong to a sync the watch will never see the start of, and leaving
@@ -179,10 +193,12 @@ class PebbleSender(private val context: Context) {
             if (!send(dict)) return false
         }
         sentEvents = events.associateBy { it.id }
+        if (wx != null) sentWx = wx
         Log.i(
             TAG,
             "calendar flush (${if (force) "forced" else "changed"}): " +
-                "${records.size} record(s) in ${chunks.size} message(s)",
+                "${records.size} record(s) in ${chunks.size} message(s)" +
+                (wx?.let { ", ${it.size} weather alert(s)" } ?: ""),
         )
         scheduleFastBeat()
         return true

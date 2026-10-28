@@ -10,7 +10,8 @@ behind and three ahead, the mark at the quarter mark. On `gabbro` the strip runs
 full height of the display, so the glass cuts off both ends and the ruler reads as longer
 than what is shown (1.5 h behind and 3.5 h ahead on the track), and it sits left of
 centre, only as far left as the clock needs to fit beside the mark. Appointments are bands spanning their duration, tasks and reminders are wedges
-poking inward off the ruler, and the hour is numbered in a small lane just inside it. A
+poking inward off the ruler (on `gabbro`, outward, left of the notches, with the red now
+rule reaching out over them), and the hour is numbered in a small lane just inside it. A
 digital clock sits level with the now mark, and the date, a countdown, the next turn and
 whatever is running out stack beneath it, left-aligned against the strip.
 
@@ -47,10 +48,14 @@ automatically.
 - **Android companion:** lives under `pipe/`; all `gradlew` commands run from there.
   See [pipe/CLAUDE.md](pipe/CLAUDE.md).
 
-`events.{c,h}`, `wire.{c,h}`, `wbatt.{c,h}`, `tools/grab.py` and
-`tools/send-demo-events.py` exist in both faces **by copy, not by reference**. They
-carry no rendering knowledge, and the copies are identical except for each face's own
-visible-window constants. A fix to the decoder or the battery estimate belongs in both.
+`events.{c,h}`, `wire.{c,h}`, `wbatt.{c,h}`, `wx.{c,h}`, `wxglyph.{c,h}`,
+`tools/grab.py` and `tools/send-demo-events.py` exist in both faces **by copy, not by
+reference**. They carry no rendering knowledge, and the copies are identical except for
+each face's own visible-window constants. A fix to the decoder or the battery estimate
+belongs in both. `wxglyph.{c,h}` is the one copied file that does know what something
+looks like — it draws the weather icons from `resources/images/pebble_weather_icons/`,
+which both faces carry under the same resource names — so the two faces cannot draw the
+same storm two ways.
 `tools/make-menu-icon.py` is the exception that is *not* a copy: it draws that face's
 launcher icon and so is the one tools script that knows what its face looks like.
 
@@ -77,9 +82,9 @@ hour hand and a hand is the same shape everywhere.
 
 ## The one contract that ties the components together
 
-Seven Pebble AppMessage keys — `Heartbeat` (`10000`), `CalEvents` (`10001`), `CalFlags`
-(`10002`), `NavManeuver` (`10003`), `NavDistance` (`10004`), `NavUnit` (`10005`) and
-`PhoneBattery` (`10006`) — addressed to both app UUIDs,
+Eight Pebble AppMessage keys — `Heartbeat` (`10000`), `CalEvents` (`10001`), `CalFlags`
+(`10002`), `NavManeuver` (`10003`), `NavDistance` (`10004`), `NavUnit` (`10005`),
+`PhoneBattery` (`10006`) and `WxAlerts` (`10007`) — addressed to both app UUIDs,
 `f2fc68a6-9636-4694-929b-73c11c33f0e4` (digital) and
 `bd9bd299-527e-4236-8206-27be3dc9781c` (analog). This is the entire integration surface,
 and it runs one way: phone → watch.
@@ -93,7 +98,8 @@ Calendar entries travel as a packed byte array — an id, an absolute UTC start,
 duration and two enum bytes each. **No titles, locations or attendees ever cross the
 wire.** The phone sends *meaning*; the watch owns rendering, because three displays of
 two different shapes and two different colour depths cannot share a pixel decision made
-on the phone.
+on the phone. Severe weather travels the same way on its own key — a hazard enum, an
+onset and a duration — and the thresholds that decide *severe* are the phone's.
 
 Before changing message keys, a UUID, the blob layout, or AppMessage buffer sizes, read
 [docs/protocol.md](docs/protocol.md) — every component must move together, in one

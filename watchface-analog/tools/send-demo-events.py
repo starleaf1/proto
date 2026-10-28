@@ -21,6 +21,12 @@ in step with `demo_seed()` in `src/c/proto.c`**; the two are meant to show the s
     tools/send-demo-events.py --clear             # flush carrying no records
     tools/send-demo-events.py --remove 5 6        # delta: two removes, no flush
     tools/send-demo-events.py --dry-run           # print the blob, send nothing
+    tools/send-demo-events.py --wx-running        # weather: a storm under way
+    tools/send-demo-events.py --wx-clear          # weather: "the forecast is clear"
+    tools/send-demo-events.py --no-wx             # weather: say nothing about it
+
+Weather rides in the same message as the calendar, on its own key, exactly as the
+companion sends it. `WX_DEMO` below is its set, and `demo_seed()` seeds the same one.
 
 With no `--emulator` it talks to whichever emulator is already running, and starts one
 if none is — installing the watchface as it goes, because a freshly booted emulator is
@@ -47,6 +53,7 @@ WATCHFACE = pathlib.Path(__file__).resolve().parent.parent
 KEY_HEARTBEAT = 10000
 KEY_CAL_EVENTS = 10001
 KEY_CAL_FLAGS = 10002
+KEY_WX_ALERTS = 10007
 
 CAL_VERSION = 1
 CAL_FLUSH = 0x1
@@ -59,6 +66,17 @@ EV_TASK = 1
 # 6 header bytes, 12 per record, little-endian throughout.
 HEADER = "<BBI"
 RECORD = "<IiHBB"
+
+# The weather blob: 2 header bytes, 8 per alert, replaced whole on every message
+# that carries the key.
+WX_VERSION = 1
+WX_HEADER = "<BB"
+WX_RECORD = "<BBiH"
+WX_MAX = 8
+WX_THUNDER, WX_RAIN, WX_SNOW, WX_ICE, WX_GUSTS, WX_HEAT = range(1, 7)
+WX_NAMES = {WX_THUNDER: "thunder", WX_RAIN: "rain", WX_SNOW: "snow",
+            WX_ICE: "ice", WX_GUSTS: "gusts", WX_HEAT: "heat"}
+WX_FUTURE = 200     # a hazard no watch knows yet: must draw the generic mark
 
 # What the companion caps a message at, and what the 512-byte inbox was sized for:
 # 6 + 24 x 12 = 294 payload bytes. More than this splits, with MORE set on all but
@@ -103,6 +121,67 @@ NURON_DEMO = [
     (NURON_BIT | 22, 47, 0, EV_TASK, "2 min from the last -- must still merge"),
     (NURON_BIT | 23, -30, 0, EV_TASK, "high-bit id, overdue: must take the late colour"),
 ]
+
+
+# hazard, onset, duration in minutes, why it is here. An onset is minutes from now,
+# or "rain": the next whole hour at least 45 min out whose clock hour is a multiple of
+# three, which puts the glyph on 12, 3, 6 or 9 -- where an hourly forecast lands an
+# onset a third of the time, and where its halo has to cut a major tick.
+WX_DEMO = [
+    (WX_GUSTS, 10, 50, "inside 30 min: in the slot, counting to the onset"),
+    (WX_RAIN, "rain", 60, "on a major tick"),
+    (WX_ICE, ("rain", 75), 45, "a quarter-hour onset, between hour labels"),
+    (WX_SNOW, 300, 120, "mid-ring"),
+    (WX_THUNDER, 480, 30, "20 min from the next -- they cannot draw apart"),
+    (WX_GUSTS, 500, 40, "-> must not draw while the thunder is on the dial"),
+    (WX_HEAT, 630, 30, "against the seam"),
+    (WX_SNOW, 690, 60, "past the 11 h horizon -- must not draw"),
+]
+
+# --wx-running swaps the first entry for this: a storm already under way, which the
+# slot shows in a filled box counting to its end.
+WX_RUNNING = (WX_THUNDER, -30, 90, "running: filled box, counting to the end")
+
+
+def rain_onset(now):
+    t = now + 45 * 60
+    t += 3600 - t % 3600
+    while time.localtime(t).tm_hour % 3:
+        t += 3600
+    return t
+
+
+def wx_records(now, running=False, future=False):
+    """-> [(hazard, onset_epoch_s, dur_min, why)]"""
+    table = list(WX_DEMO)
+    if running:
+        table[0] = WX_RUNNING
+    out = []
+    for hazard, when, dur, why in table:
+        if when == "rain":
+            onset = rain_onset(now)
+        elif isinstance(when, tuple):
+            onset = rain_onset(now) + when[1] * 60
+        else:
+            onset = now + when * 60
+        if future and hazard == WX_HEAT:
+            hazard, why = WX_FUTURE, "unknown hazard: the generic mark"
+        out.append((hazard, onset, dur, why))
+    return out
+
+
+def pack_wx(alerts):
+    blob = struct.pack(WX_HEADER, WX_VERSION, len(alerts))
+    for hazard, onset, dur, _ in alerts:
+        blob += struct.pack(WX_RECORD, hazard, 0, onset, dur)
+    return blob
+
+
+def describe_wx(alert):
+    hazard, onset, dur, why = alert
+    when = time.strftime("%H:%M", time.localtime(onset))
+    end = time.strftime("%H:%M", time.localtime(onset + dur * 60))
+    return "  wx {:<8} {}-{}  {}".format(WX_NAMES.get(hazard, str(hazard)), when, end, why)
 
 
 def app_uuid():
@@ -224,8 +303,11 @@ def describe(rec):
     return "  id {:<3} {}".format(eid, what)
 
 
-def send(opts, records, flush):
-    """One message per chunk. FLUSH rides the first, MORE every one but the last."""
+def send(opts, records, flush, wx=None):
+    """One message per chunk. FLUSH rides the first, MORE every one but the last.
+
+    `wx` is the weather list, or None to leave the key out -- which the watch reads
+    as "no news", not as a clear forecast. It rides the first chunk."""
     chunks = [records[i:i + MAX_RECORDS]
               for i in range(0, len(records), MAX_RECORDS)] or [[]]
     uuid = app_uuid()
@@ -251,13 +333,22 @@ def send(opts, records, flush):
                  "--int", "{}={}".format(KEY_CAL_FLAGS, flags),
                  "{}={}".format(KEY_HEARTBEAT, opts.heartbeat),
                  "--bytes", "{}={}".format(KEY_CAL_EVENTS, blob.hex())]
+        wx_blob = pack_wx(wx) if wx is not None and i == 0 else None
+        if wx_blob is not None:
+            argv += ["{}={}".format(KEY_WX_ALERTS, wx_blob.hex())]
 
         print("message {}/{}: {} record(s), flags {:#04x}, {} bytes".format(
             i + 1, len(chunks), len(chunk), flags, len(blob)))
         for rec in chunk:
             print(describe(rec))
+        if wx_blob is not None:
+            print("  weather: {} alert(s), {} bytes".format(len(wx), len(wx_blob)))
+            for alert in wx:
+                print(describe_wx(alert))
         if opts.dry_run:
             print("  blob {}".format(blob.hex()))
+            if wx_blob is not None:
+                print("  wx   {}".format(wx_blob.hex()))
             continue
 
         if subprocess.run(argv, cwd=WATCHFACE).returncode != 0:
@@ -305,6 +396,16 @@ def main():
                     help="add three Nuron entries, whose ids have bit 31 set. "
                          "They must render identically to the low-id entries; "
                          "anything else is a sign-extension bug in the decoder.")
+    wx = ap.add_mutually_exclusive_group()
+    wx.add_argument("--no-wx", action="store_true",
+                    help="leave the weather key out: the watch keeps what it holds")
+    wx.add_argument("--wx-clear", action="store_true",
+                    help="send an empty weather blob -- 'the forecast is clear'")
+    wx.add_argument("--wx-running", action="store_true",
+                    help="swap the imminent gusts for a storm already under way")
+    ap.add_argument("--wx-unknown", action="store_true",
+                    help="send the heat alert as a hazard no watch knows; it must "
+                         "draw as the generic mark")
     ap.add_argument("--dry-run", action="store_true",
                     help="print the blob and what it says, send nothing")
     opts = ap.parse_args()
@@ -338,7 +439,16 @@ def main():
     else:
         records, flush = demo_records(now, opts.nuron), True
 
-    return send(opts, records, flush)
+    # A calendar delta or clear is about the calendar; weather stays out of it unless
+    # asked for, and an absent key is the watch's cue to keep what it has.
+    if opts.no_wx or ((opts.clear or opts.remove) and not opts.wx_clear):
+        wx = None
+    elif opts.wx_clear:
+        wx = []
+    else:
+        wx = wx_records(now, opts.wx_running, opts.wx_unknown)[:WX_MAX]
+
+    return send(opts, records, flush, wx)
 
 
 if __name__ == "__main__":

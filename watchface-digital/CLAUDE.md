@@ -7,9 +7,11 @@ repo-root `README.md` and `docs/` for the system-level picture and the watch↔p
 protocol contract.
 
 The two faces are independent apps with their own UUIDs, built and installed separately.
-`events.{c,h}`, `wire.{c,h}`, `wbatt.{c,h}`, `tools/grab.py` and
-`tools/send-demo-events.py` exist in each **by copy**, identical except for that face's
-visible-window constants — a fix to the decoder or the battery estimate belongs in both.
+`events.{c,h}`, `wire.{c,h}`, `wbatt.{c,h}`, `wx.{c,h}`, `wxglyph.{c,h}`, `tools/grab.py`
+and `tools/send-demo-events.py` exist in each **by copy**, identical except for that
+face's visible-window constants — a fix to the decoder or the battery estimate belongs in
+both. `wxglyph` draws the weather icons, bitmaps both faces carry under the same names,
+so the two faces cannot draw them two ways.
 `tools/make-menu-icon.py` is not a copy; it draws this face's launcher icon.
 
 > **Run every `pebble` command from this directory** (`watchface-digital/`), not the repo
@@ -88,6 +90,10 @@ leaves the two by-copy scripts differing in prose alone. This face reaches three
 hours ahead on the rectangles and three and a half on `gabbro`, so here they only check
 that nothing past the end draws.
 
+Weather rides the same message. Of `WX_DEMO`, only the first two land on this strip:
+gusts ten minutes out, held just past `flint`'s wedge and shown in nav's row as well; and
+rain on the next hour that is a multiple of three, which takes that hour's label.
+
 Neither way seeds a band clipped at the *top* of the window. Check it by hand when the
 track changes: `--clear`, then one appointment starting an hour and a half ago and
 running three.
@@ -100,6 +106,8 @@ tools/send-demo-events.py --clear            # flush with no records: an empty w
 tools/send-demo-events.py --remove 1 5       # delta, no flush
 tools/send-demo-events.py --dry-run          # print the blob and what it says
 tools/send-demo-events.py --list             # which emulators are up, and how
+tools/send-demo-events.py --wx-running       # a storm under way: the filled box
+tools/send-demo-events.py --wx-clear         # an empty weather blob: no glyphs
 
 # Compiled in
 PROTO_DEMO=1 pebble build
@@ -119,7 +127,7 @@ appears to do nothing** — the script retries once through an install for exact
 case. It works out `--vnc` for itself; see the gotcha below for why you should let it.
 
 **The two are meant to show the same face** — extend `demo_seed()` in `src/c/proto.c`
-and `DEMO` in the script together, and never ship a build with the flag set.
+and `DEMO` (and `WX_DEMO`) in the script together, and never ship a build with the flag set.
 
 ### Headless environments
 
@@ -189,7 +197,7 @@ watchface-digital/
   src/c/           C sources — see the module table below
   src/pkjs/        PebbleKit JS entry point (a deliberate no-op stub)
   tools/           Dev scripts — the demo calendar sender, the icon generator
-  resources/       Fonts, and the launcher icon — the only image on the face
+  resources/       Fonts, the launcher icon, and images/pebble_weather_icons/
   package.json     Pebble app manifest (UUID, platforms, message keys, resources)
   wscript          waf build rules — also where PROTO_DEMO is wired in
   build/           Build output (generated; gitignored)
@@ -202,12 +210,16 @@ watchface-digital/
 | `theme.h` | The whole palette, the three font choices and the clock's cell size. |
 | `digits.{c,h}` | The clock's numerals, drawn on a lattice rather than set in a font. |
 | `events.{c,h}` | The event table, the live window, linger rules, countdown choice. |
-| `strip.{c,h}` | Bands, notches, markers, the pointer. |
+| `strip.{c,h}` | Bands, notches, markers, the pointer, weather glyphs. |
 | `slots.{c,h}` | The three conditional rows and every glyph. |
 | `wire.{c,h}` | The AppMessage inbox and the two watchdogs. |
 | `wbatt.{c,h}` | The watch's own hours-remaining estimate. |
+| `wx.{c,h}` | The weather table, its persistence, the slot's pick. |
+| `wxglyph.{c,h}` | The weather icons. |
 
-**One image resource, and it is the launcher icon.** Every glyph the *face* draws —
+**Two kinds of image resource: the launcher icon, and the weather icons.** The weather icons
+are 12 px pixel art, `bw/` for `flint` and `color/` for `emery` and `gabbro`, drawn at
+1:1. Every other glyph the *face* draws —
 turn arrows, the phone silhouette, the battery, the marker triangles — is drawn from
 primitives or a normalised point table, so it stays crisp at three sizes and costs
 nothing from the resource budget. The icon in the watchface selector cannot be: the
@@ -332,6 +344,36 @@ of `NUM_CELL`, so a step up there costs the strip length.
 Each of these was tried the other way first. The reasoning is in the source next to the
 code; this is the index.
 
+- **On the rectangles a weather icon takes an hour label's place; on `gabbro` it sits
+  left of the track.** At its onset, 12 px square, either way. The rectangles' strip is
+  hard against the screen edge, so the only column that costs the text nothing is the
+  label lane, and the label it would overlap is dropped — the gap between the labels and
+  the text column is 7 px on `flint`, against an icon that needs 12 plus a margin, and
+  widening it would move the clock. `gabbro`'s strip stands left of centre, so the glass
+  left of it is empty: the icon goes there, a margin clear of the deepest marker that now
+  shares that side (`mark_reach`), and every label stays. An icon the glass would clip
+  waits until it is wholly on.
+- **On `gabbro` the bands and wedges stand left of the notches; on the rectangles they
+  share the notch zone.** `MARK_DIR` in `geometry.h`. The rectangles' strip is hard
+  against the screen edge and has no outboard. `gabbro`'s has empty glass there, so the
+  calendar takes it and the ruler and the calendar each get a lane: the notches stop
+  crossing the bands and the labels stop sharing a column with the wedges. Three things
+  follow. The notches start *at* the track instead of straddling it, moved in by their
+  own round cap, or every hour notch puts a black nub into the band it meets. The red
+  rule straddles the track (`rule_out` outboard, over the deepest marker; `rule_len`
+  inboard, just past an hour notch's cap). And the label lane comes in by the markers'
+  depth, so `zone` shrinks and the solved strip x sits further right, which is more
+  visible track.
+- **An imminent alert stays on the strip.** The analog face takes it off the dial thirty
+  minutes out because its hour hand covers the glyph; nothing covers this lane, so here it
+  draws until its onset and the slot shows it too. Except under `flint`'s wedge, which is
+  drawn last and covers the lane for twenty minutes either side of now: an onset in that
+  reach is held just past the wedge, later by at most that much.
+- **Weather in the rows needs no resolver.** The rows are stacked, so nav's row carries a
+  storm while there is no turn and the bottom row carries it when there is, below the
+  companion-down glyph and above both batteries. It stays while the companion is gone, as
+  the countdown does. The reading is the icon and `hh:mm` in black, in a filled black box
+  once the weather has started, with the icon on a background tile so it stays legible.
 - **A left-edge strip is the old dial's nine-o'clock ray, and nothing about the helpers
   changed.** See `track_at` in `geometry.c`. At `a = TRIG_MAX_ANGLE * 3 / 4`, `step_in`
   moves `+x` — inward, toward the content column — and `step_side` moves `∓y` along the
@@ -660,7 +702,7 @@ existence is a function of `now`. The previous design's flash subsystem
 and its `app_focus_service` subscription are both gone — there is nothing sub-minute
 left to pause under a modal.
 
-**Two persistent-storage keys, and the event table is one of them.** A watchface is not
+**Three persistent-storage keys, and the event table is one of them.** A watchface is not
 a resident program — the firmware kills it whenever the user opens anything else and
 starts it again when they come back — so key 1 holds `wbatt`'s drain anchor, which could
 never accumulate a sample history in RAM, and key 2 holds the calendar table, which used
@@ -669,6 +711,8 @@ slow tier's 600 s, so a glance at a notification cost up to ten minutes of a bar
 An empty strip does not read as "waiting", it reads as "nothing scheduled". `events_save()`
 runs in `deinit()` and `events_load()` in `init()`; entries carry absolute starts, so
 `events_gc()` drops whatever expired while the app was gone on the first paint back.
+Key 3 holds the weather table for the same reason, `wx_save()` and `wx_load()` beside the
+calendar's; an alert carries an absolute onset and end, and `wx_gc()` retires it.
 
 **Two `AppTimer`s remain**, both in `wire.c`: the companion liveness watchdog and the
 nav-slot expiry. Both follow the same single-owner pattern — one `*_sync()` function

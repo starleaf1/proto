@@ -36,6 +36,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -57,6 +58,8 @@ import link.dendritik.proto.pipe.calendar.CalendarPrefs
 import link.dendritik.proto.pipe.calendar.CalendarSource
 import link.dendritik.proto.pipe.pebble.PebbleSender
 import link.dendritik.proto.pipe.ui.theme.ProtoPipeTheme
+import link.dendritik.proto.pipe.weather.WeatherLocation
+import link.dendritik.proto.pipe.weather.WeatherPrefs
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Date
@@ -77,10 +80,37 @@ class MainActivity : ComponentActivity() {
     private var associated by mutableStateOf(false)
     private var calendars by mutableStateOf(emptyList<CalendarInfo>())
     private var chosen by mutableStateOf<Set<String>?>(null)
+    private var weatherOn by mutableStateOf(false)
+    private var locationGranted by mutableStateOf(false)
 
     // Lazy because both need a Context, and the activity is not one until onCreate.
     private val calendarSource by lazy { CalendarSource(this) }
     private val calendarPrefs by lazy { CalendarPrefs(this) }
+    private val weatherPrefs by lazy { WeatherPrefs(this) }
+
+    /**
+     * Location, in two steps where Android insists on two. From Android 11 the
+     * background grant cannot be asked for alongside the foreground one — the request is
+     * refused outright — and it is granted on a settings page, as "Allow all the time",
+     * rather than in a dialog. The switch turns on only once both are held, so it never
+     * reads as on while fetching nothing.
+     */
+    private val requestLocation = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) {
+        val coarse = granted(Manifest.permission.ACCESS_COARSE_LOCATION)
+        if (coarse && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+            !granted(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+        ) {
+            requestBackgroundLocation.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+        } else {
+            finishWeatherGrant()
+        }
+    }
+
+    private val requestBackgroundLocation = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { finishWeatherGrant() }
 
     private val requestPermissions = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -111,6 +141,9 @@ class MainActivity : ComponentActivity() {
                         onUnpair = ::unpairWatch,
                         onResync = ::resyncNow,
                         onSetSent = ::setSent,
+                        weatherOn = weatherOn,
+                        locationGranted = locationGranted,
+                        onSetWeather = ::setWeather,
                     )
                 }
             }
@@ -135,6 +168,8 @@ class MainActivity : ComponentActivity() {
         PipeStatus.calendarGranted = calendarGranted
         calendars = calendarSource.calendars()
         chosen = calendarPrefs.chosen()
+        locationGranted = WeatherLocation.granted(this)
+        weatherOn = weatherPrefs.enabled()
         PipeStatus.host = hostAhead()
         // The engine's reconcile() is the only other writer of this, so on screen it can
         // be a whole tick period out of date — and it is what gates the re-sync button.
@@ -202,6 +237,35 @@ class MainActivity : ComponentActivity() {
         val next = CalendarChoice.toggle(calendars, chosen, key, send)
         calendarPrefs.setChosen(next)
         chosen = next
+    }
+
+    /**
+     * The weather switch. On asks for location first if it is not held; the engine is
+     * listening to the same preference, fetches as soon as it flips on, and sends an
+     * empty forecast — a clear sky — as soon as it flips off.
+     */
+    private fun setWeather(on: Boolean) {
+        if (!on || WeatherLocation.granted(this)) {
+            weatherPrefs.setEnabled(on)
+            weatherOn = on
+            return
+        }
+        val wanted = buildList {
+            add(Manifest.permission.ACCESS_COARSE_LOCATION)
+            // Android 10 takes both in one dialog; 11 and later refuse that — see above.
+            if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q) {
+                add(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+            }
+        }
+        requestLocation.launch(wanted.toTypedArray())
+    }
+
+    private fun finishWeatherGrant() {
+        refresh()
+        if (locationGranted) {
+            weatherPrefs.setEnabled(true)
+            weatherOn = true
+        }
     }
 
     // ---------------------------------------------------------------------------
@@ -272,6 +336,9 @@ private fun StatusScreen(
     onUnpair: () -> Unit,
     onResync: () -> Unit,
     onSetSent: (key: String, send: Boolean) -> Unit,
+    weatherOn: Boolean,
+    locationGranted: Boolean,
+    onSetWeather: (Boolean) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     var spinning by remember { mutableStateOf(false) }
@@ -302,6 +369,10 @@ private fun StatusScreen(
 
         if (calendarGranted) {
             CalendarsCard(calendars, chosen, onSetSent)
+        }
+
+        if (calendarGranted) {
+            WeatherCard(weatherOn, locationGranted, onSetWeather)
         }
 
         if (canAssociate) {
@@ -436,6 +507,43 @@ private fun resyncText(state: Resync): String? = when (state) {
     Resync.REQUESTED -> "Nothing answered — no engine is running."
     Resync.SENT -> "Flushed the window to the watch."
     Resync.NOTHING_SENT -> "Nothing went out — check the link."
+}
+
+/**
+ * Severe weather: the switch, what it costs, and whether it is working.
+ *
+ * The one setting that sends something about the phone off the phone, so the card says
+ * what goes and where before it is switched on rather than after.
+ */
+@Composable
+private fun WeatherCard(on: Boolean, granted: Boolean, onSet: (Boolean) -> Unit) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .toggleable(value = on, role = Role.Switch, onValueChange = onSet),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Severe weather", style = MaterialTheme.typography.titleMedium)
+                Switch(checked = on, onCheckedChange = null)
+            }
+            Text(
+                "Marks storms, heavy rain, snow, ice and strong gusts on the watch at the " +
+                    "time they are forecast to start. Every half hour your approximate " +
+                    "location, to about a kilometre, is sent to open-meteo.com for the " +
+                    "forecast. Choose \"Allow all the time\" when asked: the forecast is " +
+                    "fetched with the screen off.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (on || granted) StatusRow("Location, all the time", granted)
+            if (on) {
+                Text("Forecast: ${PipeStatus.wxState}")
+                Text("Alerts sent: ${PipeStatus.wxAlertCount}")
+            }
+        }
+    }
 }
 
 /**

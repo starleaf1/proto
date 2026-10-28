@@ -75,6 +75,7 @@ class ProtocolTest {
             "NavDistance" to Protocol.KEY_NAV_DISTANCE,
             "NavUnit" to Protocol.KEY_NAV_UNIT,
             "PhoneBattery" to Protocol.KEY_PHONE_BATTERY,
+            "WxAlerts" to Protocol.KEY_WX_ALERTS,
         )
         for (face in faces) {
             val json = File(root, "$face/package.json").readText()

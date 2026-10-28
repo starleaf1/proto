@@ -32,7 +32,7 @@ for AppMessage's own ACK/NACK bookkeeping.
 
 ## Message keys
 
-Seven keys. Ids are positional from `10000` in the order the names appear under
+Eight keys. Ids are positional from `10000` in the order the names appear under
 `messageKeys` in a face's `package.json`. **Both faces declare the same array in the
 same order**, which is what lets one set of ids serve them both; `ProtocolTest` fails if
 that drifts.
@@ -46,6 +46,7 @@ that drifts.
 | `NavDistance` | `10004` | `int32` | Distance to the turn, in **tenths** of `NavUnit`. |
 | `NavUnit` | `10005` | `int32` | `0` m, `1` km, `2` ft, `3` mi. |
 | `PhoneBattery` | `10006` | `int32` | Charge percentage `0`–`100`, or `-1` for unknown. |
+| `WxAlerts` | `10007` | `bytes` | Severe weather alerts — see below. Absent means "no news". |
 
 Three binding styles, one set of ids:
 
@@ -185,6 +186,66 @@ apps, and its REST API documents `due` as *"Only date information is recorded; t
 time portion of the timestamp is discarded"*, so every Google task arrives as a bare
 date — exactly the whole-day case the watch is specified to ignore.
 
+## `WxAlerts` blob
+
+Severe weather the forecast says is coming. Little-endian, a header and N fixed-size
+records:
+
+```
+header   u8 version (= 1)   u8 count
+record   u8 hazard   u8 reserved (zero)   i32 onsetEpochS   u16 durMin
+```
+
+2 header bytes, 8 per record, at most **8** records (66 bytes) — the watch's table.
+
+| `hazard` | |
+| --- | --- |
+| `0` | never sent; the watch skips it |
+| `1` | thunderstorm |
+| `2` | heavy rain |
+| `3` | snow |
+| `4` | ice — freezing rain or drizzle |
+| `5` | strong gusts |
+| `6` | heat |
+
+- **Three states, not two.** The key present replaces the watch's whole weather table;
+  present with `count = 0` is "the forecast is clear"; **absent** is "no news", and the
+  watch keeps what it holds until each alert ends. The companion leaves it out only
+  before its first fetch since starting, which is the one time it has nothing better to
+  offer than the table the watch restored. It is independent of `CalFlags`: a calendar
+  flush does not touch weather and the weather key does not touch the calendar.
+- **Its own key, not a third calendar `kind`.** A calendar flush clears the event table,
+  weather would spend the calendar's 24-record cap, and `wire.c` folds an unknown `kind`
+  to an appointment, so a face built before weather existed would have drawn a storm as
+  a meeting. An unknown key is ignored instead.
+- **An unknown `hazard` is drawn, not dropped.** A face built before a value existed
+  shows a warning triangle at its onset. Something severe is coming, and saying so without
+  the detail is truer than silence — so a hazard can be added on the phone alone.
+- **A wrong `version` is ignored**, and the table already held stays.
+- **Alerts do not overlap.** The companion gives each step of the forecast at most one
+  hazard, so the watch never has two running at once.
+- **The reserved byte is not a severity.** It would be one if the watch drew one; the
+  wire carries nothing the watch does not render.
+
+### Where it comes from
+
+The companion fetches an hourly forecast, with fifteen-minute detail where there is
+any, from [Open-Meteo](https://open-meteo.com) for the phone's coarse position rounded
+to two decimals — about a kilometre — at most every half hour, and only once the user
+has switched it on. It is the one thing in the system that sends anything about the phone
+off the phone. The fetch rides the periodic tick ahead of that tick's flush, so the tick
+still sends one message, and that message carries the new forecast.
+
+Thresholds live in `pipe`'s `HazardPolicy`: freezing-rain codes, thunderstorm codes,
+1 cm/h of snow, 4 mm/h of rain, 60 km/h gusts, and 35 °C apparent for heat, which is
+off by default. Open-Meteo stamps its sums and maxima at the **end** of the step they
+cover — the precipitation at 15:00 fell from 14:00 — and its weather code at the start,
+and the policy reads each accordingly; read naively, every onset lands an hour late.
+
+A failed fetch holds the last forecast for three hours, minus whatever of it has ended,
+then sends an empty list. A storm forecast three hours ago is a good guess; one forecast
+yesterday is a stale marker read as a fact.
+
 ## Navigation
 
 The phone sends the maneuver's **shape**, not an arrow, and a number plus a unit, not
@@ -221,6 +282,9 @@ instruction — and the general watchdog is far too slow to catch it.
 **The phone owns policy.** Which calendars count, what a whole-day entry is, whether
 an entry is an appointment or a reminder, when something has been removed, what the
 phone's charge is, and which turn is next.
+
+The phone also owns what counts as **severe weather** — the thresholds above are policy,
+and the wire carries a hazard and a time, never a millimetre.
 
 **The watch owns rendering, and every threshold that is really a rendering decision.**
 Which blue, how deep a band sits in the notch zone, what a turn arrow looks like at
@@ -348,6 +412,10 @@ not, because calendar entries are not counts:
   complete.
 - **Navigation is dropped** on either failure. A stale turn is the one genuinely
   dangerous lie.
+- **Weather alerts stay on screen**, for the calendar's reason: each one carries an
+  absolute onset and duration and ends on its own. The slot reading is hidden behind the
+  companion-down alert where the two share space (the analog rectangles' band and
+  `gabbro`'s single slot); the timeline glyphs are not.
 - **The phone's battery keeps its last value**, but the companion-down alert outranks
   it, so it is not on screen anyway.
 - **The watch's own battery is unaffected.** It is the one thing the watch computes
@@ -358,10 +426,11 @@ not, because calendar entries are not counts:
 The watch opens `app_message_open(512, 64)`.
 
 A Pebble dictionary costs `1 + (n × 7) + payload` — a 1-byte header, then 7 bytes of
-tuple header per entry. The largest message is a full `CalEvents` sync: 24 records is
-`6 + 24 × 12 = 294` payload bytes, plus two `int32` keys, so `1 + 3×7 + 294 + 8 = 324`
-bytes. 512 leaves comfortable headroom, and `app_message_inbox_size_maximum()` is far
-above it.
+tuple header per entry. The largest message is a full `CalEvents` sync with the weather
+riding along: 24 records is `6 + 24 × 12 = 294` payload bytes, the full `WxAlerts` blob
+`2 + 8 × 8 = 66`, plus two `int32` keys, so `1 + 4×7 + 294 + 66 + 8 = 397` bytes. 512
+still leaves headroom, and `app_message_inbox_size_maximum()` is far above it.
+`WxBlobTest` holds that sum.
 
 The 24-record cap lives in `EventBlob.MAX_RECORDS` and is deliberately well under the
 limit, because **an oversized AppMessage is not truncated — it fails to transmit
@@ -387,6 +456,9 @@ it knows.
   stale marker rather than one period of an empty window. It costs `6 + 24 × 12 = 294`
   payload bytes against a bare heartbeat's four, once per period. The change-driven path
   sends only when the scan changed; sending regardless is the tick's alone.
+- **Weather rides the calendar flush**, in its first message, whenever the companion has
+  a forecast to state. A forecast that changed is reason enough to send one between
+  ticks.
 - **Put `Heartbeat` in every message**, which is what makes ordinary traffic a life sign
   and lets the tick stay silent when it has just sent a flush.
 - **Say nothing while Bluetooth is down.**
@@ -436,4 +508,9 @@ pebble send-app-message --emulator flint --vnc --int 10006=28 10000=600
 
 # declare a 15 s cadence, then stay quiet: the companion-down alert appears in ~45 s
 pebble send-app-message --emulator flint --vnc --int 10000=15
+
+# weather rides the demo calendar flush; these vary it
+watchface-analog/tools/send-demo-events.py --wx-running    # a storm already under way
+watchface-analog/tools/send-demo-events.py --wx-unknown    # a hazard no watch knows
+watchface-analog/tools/send-demo-events.py --wx-clear      # "the forecast is clear"
 ```

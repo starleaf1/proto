@@ -76,6 +76,7 @@
 #define COL_ALERT       PBL_IF_COLOR_ELSE(GColorRed, GColorBlack)
 #define COL_WARN        PBL_IF_COLOR_ELSE(GColorWindsorTan, GColorBlack)
 
+
 // Three fonts, all of them the firmware's own, and a clock that is not a font at all.
 //
 // The clock is drawn from cells — see digits.h. NUM_CELL is the lattice's cell size in

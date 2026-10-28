@@ -134,6 +134,13 @@ typedef struct {
   GRect   nav_box;
   GRect   warn_box;    // the same rect as nav_box where band_inset: one slot, not two
   bool    band_inset;  // true where the notification reading is a row of the disc
+
+  // Weather: a glyph at the clock angle of its onset, halfway between the plate's
+  // rim and the ticks' outer end. Inside the ring, because the ring is the
+  // calendar's lane and its depth is a few pixels; outside the plate, because the
+  // plate is solved from its rows and a glyph there would grow it.
+  int16_t r_wx;        // the glyph's centre
+  int16_t wx_side;     // its box, and so its size
 } Layout;
 
 // cell is the drawn numerals' lattice cell, DIGIT_CELL; the date's weekday and every

@@ -11,7 +11,8 @@ quarter mark. On the round display the strip is just as straight but runs the fu
 height of the display, so the glass cuts off both ends and the ruler reads as carrying
 on past the edge (1.5 h behind and 3.5 h ahead on the track, about 1 and 3 visible). It
 sits left of centre, only as far left as the clock needs to fit beside the pointer. Appointments are bands spanning
-their duration; tasks and reminders are wedges poking inward off the ruler. Beside it a
+their duration; tasks and reminders are wedges poking inward off the ruler (outward, left of the
+notches, on the round display). Beside it a
 digital clock, level with the pointer, and under that the date, a countdown, the next
 turn and whatever is running out, left-aligned against the strip.
 
@@ -59,7 +60,7 @@ carried by shape or depth first, with colour layered on top only where there is 
 | | |
 | --- | --- |
 | App UUIDs | `f2fc68a6-9636-4694-929b-73c11c33f0e4` (digital), `bd9bd299-527e-4236-8206-27be3dc9781c` (analog) |
-| Message keys | `Heartbeat` (`10000`), `CalEvents` (`10001`), `CalFlags` (`10002`), `NavManeuver` (`10003`), `NavDistance` (`10004`), `NavUnit` (`10005`), `PhoneBattery` (`10006`) |
+| Message keys | `Heartbeat` (`10000`), `CalEvents` (`10001`), `CalFlags` (`10002`), `NavManeuver` (`10003`), `NavDistance` (`10004`), `NavUnit` (`10005`), `PhoneBattery` (`10006`), `WxAlerts` (`10007`) |
 | Direction | phone → watch, always |
 
 Calendar entries arrive as a packed byte array: an id, an absolute start time, a
