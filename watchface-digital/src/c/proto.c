@@ -2,6 +2,7 @@
 #include "digits.h"
 #include "events.h"
 #include "geometry.h"
+#include "icons.h"
 #include "slots.h"
 #include "strip.h"
 #include "theme.h"
@@ -240,6 +241,7 @@ static void deinit(void) {
   events_save();
   wx_save();
   wx_glyph_deinit();
+  icons_deinit();
   wire_deinit();                 // before window_destroy: its timers repaint
   tick_timer_service_unsubscribe();
   battery_state_service_unsubscribe();

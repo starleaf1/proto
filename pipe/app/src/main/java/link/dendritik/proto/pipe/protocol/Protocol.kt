@@ -50,6 +50,16 @@ object Protocol {
      */
     const val KEY_WX_ALERTS = 10007
 
+    /**
+     * What qualifies the maneuver: a roundabout's exit and shape, and the traffic side.
+     * Packed into one `int32` by [NavDetail][link.dendritik.proto.pipe.pebble.NavDetail]
+     * and sent in every nav message, because the watch resets it whenever
+     * [KEY_NAV_MANEUVER] arrives without it. Its own key rather than spare bits of the
+     * maneuver: a face that predates it clamps an unknown maneuver to "none" and would
+     * clear the row, where an unknown key is simply ignored.
+     */
+    const val KEY_NAV_DETAIL = 10008
+
     /** First message of a fresh sync: the watch drops everything it holds. */
     const val CAL_FLUSH = 0x1
 
@@ -115,6 +125,33 @@ enum class Maneuver(val wire: Int) {
     ARRIVE(10),
 }
 
+/**
+ * Which way a roundabout exit leaves, relative to straight across. The phone decides
+ * it from the exit's geometry; "2nd exit" alone does not say it, because on a five-arm
+ * roundabout the second exit is still an early one. [UNKNOWN] is what a source with
+ * no geometry sends, and the watch draws a plain roundabout with the number in it.
+ *
+ * [wire] values are the protocol's, not the ordinals — do not renumber.
+ */
+enum class RoundaboutShape(val wire: Int) {
+    UNKNOWN(0),
+    EARLY(1),
+    MIDDLE(2),
+    LATE(3),
+    FULL_LAP(4),
+}
+
+/**
+ * Which side of the road the route drives on. It decides which way a roundabout turns
+ * and which way a u-turn swings; plain left and right turns are absolute and do not
+ * care. [LEFT] is the wire's zero because the watch's artwork is drawn for it, and
+ * right-hand traffic is its mirror image.
+ */
+enum class TrafficSide(val wire: Int) {
+    LEFT(0),
+    RIGHT(1),
+}
+
 enum class DistanceUnit(val wire: Int) {
     METRES(0),
     KILOMETRES(1),
@@ -134,6 +171,10 @@ data class NavState(
     val maneuver: Maneuver = Maneuver.NONE,
     val distanceTenths: Int = 0,
     val unit: DistanceUnit = DistanceUnit.METRES,
+    /** A roundabout's exit, counted from the entry; 0 when the source does not say. */
+    val exit: Int = 0,
+    val roundabout: RoundaboutShape = RoundaboutShape.UNKNOWN,
+    val traffic: TrafficSide = TrafficSide.LEFT,
 ) {
     val active: Boolean get() = maneuver != Maneuver.NONE
 

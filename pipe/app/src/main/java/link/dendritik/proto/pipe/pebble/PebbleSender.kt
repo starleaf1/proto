@@ -226,6 +226,7 @@ class PebbleSender(private val context: Context) {
             addInt32(Protocol.KEY_NAV_MANEUVER, nav.maneuver.wire)
             addInt32(Protocol.KEY_NAV_DISTANCE, nav.distanceTenths.coerceAtLeast(0))
             addInt32(Protocol.KEY_NAV_UNIT, nav.unit.wire)
+            addInt32(Protocol.KEY_NAV_DETAIL, NavDetail.pack(nav))
             addInt32(Protocol.KEY_PHONE_BATTERY, battery.coerceIn(-1, 100))
             addInt32(Protocol.KEY_HEARTBEAT, period)
         }

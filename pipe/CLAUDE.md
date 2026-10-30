@@ -291,6 +291,14 @@ When adding it:
   `BIND_NOTIFICATION_LISTENER_SERVICE`, and the notification-access grant flow in
   `MainActivity` (a special access, not a runtime permission).
 - `PipeEngine` forwards the facts; `PebbleSender.submitNav` already exists.
+- Roundabouts carry more than the maneuver: `NavState.exit`, `.roundabout` (which way
+  the exit leaves — early, middle, late, full lap) and `.traffic` (the side of the road),
+  packed by `NavDetail` onto `KEY_NAV_DETAIL`. The exit number is in the notification's
+  text; the shape is not, and has to come from the icon table like the maneuver does.
+  Send `RoundaboutShape.UNKNOWN` when it cannot be told — the watch then draws a plain
+  roundabout with the number in it, which is honest, where a guessed shape is not.
+  `TrafficSide.LEFT` is the wire's zero; send `RIGHT` wherever the route drives on the
+  right, or every roundabout and u-turn on the watch turns the wrong way.
 - Note that active navigation is what earns the fast 30 s heartbeat tier — currently
   nothing does, so the companion always runs on the 600 s tier.
 

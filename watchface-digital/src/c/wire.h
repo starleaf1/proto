@@ -28,6 +28,17 @@ enum {
 
 enum { NAV_UNIT_M = 0, NAV_UNIT_KM, NAV_UNIT_FT, NAV_UNIT_MI, NAV_UNIT_MAX = NAV_UNIT_MI };
 
+// A roundabout exit's direction off the island, read from NavDetail. What the phone
+// could not work out is NAV_RB_UNKNOWN, and so is anything this watch predates.
+enum {
+  NAV_RB_UNKNOWN = 0,
+  NAV_RB_EARLY,
+  NAV_RB_MIDDLE,
+  NAV_RB_LATE,
+  NAV_RB_LAP,
+  NAV_RB_MAX = NAV_RB_LAP,
+};
+
 // `on_change` is called whenever anything below changes value; the app uses it
 // to mark the root layer dirty. Called from timer and AppMessage callbacks, so
 // always on the app's own thread.
@@ -48,4 +59,8 @@ bool wire_nav_active(void);
 int  wire_nav_maneuver(void);
 int  wire_nav_distance(void);
 int  wire_nav_unit(void);
+// NavDetail, unpacked. Reset whenever a maneuver arrives without it.
+int  wire_nav_exit(void);        // 1..15, or 0 when the phone did not say
+int  wire_nav_roundabout(void);  // NAV_RB_*
+bool wire_nav_right_hand(void);  // false: left-hand traffic, which the artwork is drawn for
 int  wire_phone_battery(void);   // 0..100, or -1 when the phone has not said

@@ -32,7 +32,7 @@ for AppMessage's own ACK/NACK bookkeeping.
 
 ## Message keys
 
-Eight keys. Ids are positional from `10000` in the order the names appear under
+Nine keys. Ids are positional from `10000` in the order the names appear under
 `messageKeys` in a face's `package.json`. **Both faces declare the same array in the
 same order**, which is what lets one set of ids serve them both; `ProtocolTest` fails if
 that drifts.
@@ -47,6 +47,7 @@ that drifts.
 | `NavUnit` | `10005` | `int32` | `0` m, `1` km, `2` ft, `3` mi. |
 | `PhoneBattery` | `10006` | `int32` | Charge percentage `0`–`100`, or `-1` for unknown. |
 | `WxAlerts` | `10007` | `bytes` | Severe weather alerts — see below. Absent means "no news". |
+| `NavDetail` | `10008` | `int32` | Roundabout exit, its shape and the traffic side — see *Navigation*. Read only beside `NavManeuver`; absent there means `0`. |
 
 Three binding styles, one set of ids:
 
@@ -262,6 +263,32 @@ whether the display it is drawing on has colour at all.
 | `8` | u-turn |
 | `9` | roundabout |
 | `10` | arrive |
+
+`NavDetail` qualifies the maneuver, packed into the low byte. Bits above 7 are reserved
+and sent as zero.
+
+| Bits | Field | Values |
+| --- | --- | --- |
+| `0`–`3` | exit | `1`–`15`, counted from the entry; `0` not said |
+| `4`–`6` | roundabout shape | `0` unknown, `1` early (an exit before the straight-ahead one), `2` middle (straight ahead), `3` late (past it), `4` full lap (back the way you came); `5`–`7` read as unknown |
+| `7` | traffic side | `0` left-hand, `1` right-hand |
+
+The shape is the exit's direction off the roundabout, and it is the phone's call: "2nd
+exit" alone does not say it, because on a five-arm roundabout the second exit is still
+an early one. A source that gives the exit number and no geometry sends shape `0`, and
+the watch draws a plain roundabout with the number in it. The watch draws the digit for
+exits `1`–`9` and leaves it off above that.
+
+The traffic side is what decides which way the roundabout turns and which way a u-turn
+swings, so it is read on `NavManeuver` `8` as well as `9`. **`0` is left-hand**: the
+roundabout clockwise, the u-turn to the right. The faces' artwork is drawn that way, and
+right-hand traffic is its mirror image. The plain turns are left or right in absolute
+terms, and the traffic side does not touch them.
+
+`NavDetail` is read only from a message that carries `NavManeuver`, and is reset with
+it, so the companion sends it in every nav message — a maneuver arriving without it
+means "no detail", not "the detail as before". A face that predates the key ignores it
+and draws the plain roundabout.
 
 `NavDistance` is **tenths** of `NavUnit`. A watch face has room for about five
 characters, and `0.3 MI` needs the fraction while `250 M` does not; sending tenths
@@ -502,6 +529,10 @@ watchface-analog/tools/send-demo-events.py --emulator flint   # or watchface-dig
 
 # turn right in 250 m, on the fast heartbeat tier
 pebble send-app-message --emulator flint --vnc --int 10003=3 10004=2500 10005=0 10000=30
+
+# 2nd exit at a roundabout in 250 m, straight across, right-hand traffic:
+# NavDetail = 2 | 2 << 4 | 1 << 7 = 162
+pebble send-app-message --emulator flint --vnc --int 10003=9 10004=2500 10005=0 10008=162 10000=30
 
 # phone battery at 28% (the watch's threshold is 30)
 pebble send-app-message --emulator flint --vnc --int 10006=28 10000=600

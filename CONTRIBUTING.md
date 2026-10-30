@@ -18,7 +18,8 @@ proto/
 
 Two separate apps with their own UUIDs, built and installed separately. They share the
 protocol and a design vocabulary, and no code: `events.{c,h}`, `wire.{c,h}`,
-`wbatt.{c,h}`, `tools/grab.py` and `tools/send-demo-events.py` exist in each face
+`wbatt.{c,h}`, `wx.{c,h}`, `wxglyph.{c,h}`, `icons.{c,h}`, `tools/grab.py` and
+`tools/send-demo-events.py` exist in each face
 **by copy**, identical except for that face's visible-window constants. **A fix to the
 decoder or the battery estimate belongs in both.** `tools/make-menu-icon.py` is not a
 copy — it draws that face's own launcher icon.

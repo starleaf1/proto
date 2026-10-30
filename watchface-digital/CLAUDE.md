@@ -7,11 +7,12 @@ repo-root `README.md` and `docs/` for the system-level picture and the watch↔p
 protocol contract.
 
 The two faces are independent apps with their own UUIDs, built and installed separately.
-`events.{c,h}`, `wire.{c,h}`, `wbatt.{c,h}`, `wx.{c,h}`, `wxglyph.{c,h}`, `tools/grab.py`
-and `tools/send-demo-events.py` exist in each **by copy**, identical except for that
-face's visible-window constants — a fix to the decoder or the battery estimate belongs in
-both. `wxglyph` draws the weather icons, bitmaps both faces carry under the same names,
-so the two faces cannot draw them two ways.
+`events.{c,h}`, `wire.{c,h}`, `wbatt.{c,h}`, `wx.{c,h}`, `wxglyph.{c,h}`, `icons.{c,h}`,
+`tools/grab.py` and `tools/send-demo-events.py` exist in each **by copy**, identical
+except for that face's visible-window constants — a fix to the decoder or the battery
+estimate belongs in both. `wxglyph` and `icons` draw bitmaps both faces carry under the
+same resource names, so the two faces cannot draw them two ways; the rows' files differ
+in size between the faces, because the rows do.
 `tools/make-menu-icon.py` is not a copy; it draws this face's launcher icon.
 
 > **Run every `pebble` command from this directory** (`watchface-digital/`), not the repo
@@ -61,6 +62,9 @@ Everything except the calendar can be driven by numeric key id:
 ```bash
 # turn right in 250 m, fast heartbeat tier
 pebble send-app-message --emulator flint --vnc --int 10003=3 10004=2500 10005=0 10000=30
+
+# 2nd exit, straight across, right-hand traffic: NavDetail 10008 = 2 | 2<<4 | 1<<7
+pebble send-app-message --emulator flint --vnc --int 10003=9 10004=2500 10005=0 10008=162 10000=30
 
 # phone battery at 28% (the watch's own threshold is 30)
 pebble send-app-message --emulator flint --vnc --int 10006=28 10000=600
@@ -197,7 +201,7 @@ watchface-digital/
   src/c/           C sources — see the module table below
   src/pkjs/        PebbleKit JS entry point (a deliberate no-op stub)
   tools/           Dev scripts — the demo calendar sender, the icon generator
-  resources/       Fonts, the launcher icon, and images/pebble_weather_icons/
+  resources/       The launcher icon, images/pebble_weather_icons/, and images/icons/ (the rows')
   package.json     Pebble app manifest (UUID, platforms, message keys, resources)
   wscript          waf build rules — also where PROTO_DEMO is wired in
   build/           Build output (generated; gitignored)
@@ -211,22 +215,47 @@ watchface-digital/
 | `digits.{c,h}` | The clock's numerals, drawn on a lattice rather than set in a font. |
 | `events.{c,h}` | The event table, the live window, linger rules, countdown choice. |
 | `strip.{c,h}` | Bands, notches, markers, the pointer, weather glyphs. |
-| `slots.{c,h}` | The three conditional rows and every glyph. |
+| `slots.{c,h}` | The three conditional rows, and which glyph each one shows. |
 | `wire.{c,h}` | The AppMessage inbox and the two watchdogs. |
 | `wbatt.{c,h}` | The watch's own hours-remaining estimate. |
 | `wx.{c,h}` | The weather table, its persistence, the slot's pick. |
-| `wxglyph.{c,h}` | The weather icons. |
+| `wxglyph.{c,h}` | The weather icons, on the strip and at row size. |
+| `icons.{c,h}` | The rows' bitmaps, their mirroring, and the roundabout's exit number. |
 
-**Two kinds of image resource: the launcher icon, and the weather icons.** The weather icons
-are 12 px pixel art, `bw/` for `flint` and `color/` for `emery` and `gabbro`, drawn at
-1:1. Every other glyph the *face* draws —
-turn arrows, the phone silhouette, the battery, the marker triangles — is drawn from
-primitives or a normalised point table, so it stays crisp at three sizes and costs
-nothing from the resource budget. The icon in the watchface selector cannot be: the
-firmware draws that list, not the app, so the shape has to exist as a bitmap before the
-app runs. `tools/make-menu-icon.py` draws it from the same primitives anyway and writes
-`resources/images/`, so the source of truth is still code — see *The launcher icon*
-below.
+**Three kinds of image resource: the launcher icon, the weather icons, and the rows'
+glyphs.** The strip's weather icons are 12 px pixel art under
+`resources/images/pebble_weather_icons/`, `bw/` for `flint` and `color/` for `emery` and
+`gabbro`, drawn at 1:1 and carried file for file by the other face. Everything on the
+strip itself — bands, notches, the marker wedges, the pointer — is drawn from primitives.
+The icon in the watchface selector is a bitmap because the firmware draws that list, not
+the app; `tools/make-menu-icon.py` draws it in code and writes `resources/images/`, so
+its source of truth is the script — see *The launcher icon* below.
+
+The rows' glyphs are hand-drawn bitmaps under `resources/images/icons/<platform>/slot/`,
+one file per glyph per display, each exactly the size of the glyph box that display's
+row lays out (the number is in the file name):
+
+| Glyph box | `flint` | `emery` | `gabbro` |
+| --- | --- | --- | --- |
+| every row | 15 | 23 | 23 |
+
+`icons.{c,h}` draws them — at 1:1, centred in the box, because pixel art does not survive
+scaling — and makes the ones that are not carried:
+
+- **The right turns are the left ones mirrored.** Left and right are absolute, so there
+  is no `nav_*right*` file at all.
+- **The roundabouts and the u-turn are drawn for left-hand traffic** — the roundabout
+  clockwise (`*_cw_*`), the u-turn swinging right — and right-hand traffic, `NavDetail`'s
+  bit 7, draws them mirrored. See `docs/protocol.md`.
+- **The exit number is drawn over the roundabout, never mirrored with it,** centred on
+  the icon. The digits are 3×5 pixel art in `resources/images/icons/nav-digits/`, one set
+  for all three displays, read into a mask once and drawn at 1:1 on `flint` and doubled
+  on the colour displays. Exits 1–9 get one; above that the shape goes alone. The
+  roundabout art leaves the middle of its island clear for it.
+
+The SDK can neither flip nor scale a bitmap, so both are done on the pixels: the mirror
+is a copy made once and cached, in the source's own format and palette. It was checked
+pixel-exact on `emery` and `flint` against palettised art of two to six colours.
 
 **Every font is a system font, there are no font resources at all, and the clock is
 not a font.** Three roles (`FONT_DATE`, `FONT_SLOT`, `FONT_TICK`), selected per platform
@@ -635,27 +664,12 @@ code; this is the index.
   slack: in the run between the countdown and the warnings, which nav centres itself in.
   The rest of what it bought is headroom: the clamp that drives those gaps down through
   zero into tucks has seven more pixels before it bites.
-- **Every outlined glyph gets at least three pixels of stroke, and it used to get one.**
-  See `glyph_stroke` in `slots.c`. A slot glyph is 15 px on `flint` and 23 on the other
-  two, so the divisor of nine this was written with put `stroke_px()` on 1 for all
-  three — a maneuver arrow whose shaft is a single pixel under a filled head reads as a
-  blob with a whisker, and the phone silhouette reads as an empty box. Three, because
-  `stroke_px()` yields only odd widths and there is nothing between a hairline and three.
-- **The three-pixel floor applies from 14 px of glyph, and it used to be 16.** Gothic's
-  box is two pixels shorter than the TTF it replaced at the same reading, which took
-  `flint`'s slot glyph to 15 and dropped it back through the old floor to a hairline —
-  the exact failure the floor exists to prevent, arriving by way of a font change rather
-  than a divisor. Fourteen was measured, not assumed: at 15 px of glyph a 3 px stroke
-  leaves the phone silhouette four pixels of interior and it still reads as an outline.
-- **The battery and the calendar keep the hairline, and the other two do not.** Those two
-  are mostly interior — a cell is eight pixels tall on `flint`, and it is the calendar's
-  *open* lower half against its filled header that makes it a calendar — so a three-pixel
-  stroke closes up the thing the shape is made of. The maneuvers and the phone are edges,
-  and edges can carry it.
-- **The maneuver head came down when the shaft went up.** `HEAD_LEN`/`HEAD_HALF` were
-  tuned against a one-pixel shaft, and a head two thirds of the grid across swallowed a
-  three-pixel one whole: the glyph came off `emery` as a solid lump with no direction in
-  it. About three times the shaft's width is what reads as a head.
+- **The rows' glyphs are bitmaps, where the rest of the face is drawn.** They were drawn
+  from primitives — stroke floors, a maneuver grid, a head tuned against its shaft — and
+  are hand-drawn pixel art now, every pixel chosen at each display's exact size. The
+  price is a file per glyph per display, and a glyph box that must not change size
+  without the art changing with it: **re-measure the rows' glyph box after any change to
+  the slot font or the row heights,** and redraw at the new size.
 - **The nav row reserves no height, and that is what makes five rows fit.** Everything
   above it is flowed down from the pointer and the warnings row is pinned to the bottom,
   so nav lives in the slack between them and nothing moves whether it draws or not.

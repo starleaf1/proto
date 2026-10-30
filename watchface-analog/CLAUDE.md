@@ -60,6 +60,9 @@ Everything except the calendar can be driven by numeric key id:
 # turn right in 250 m, fast heartbeat tier
 pebble send-app-message --emulator flint --vnc --int 10003=3 10004=2500 10005=0 10000=30
 
+# 2nd exit, straight across, right-hand traffic: NavDetail 10008 = 2 | 2<<4 | 1<<7
+pebble send-app-message --emulator flint --vnc --int 10003=9 10004=2500 10005=0 10008=162 10000=30
+
 # phone battery at 28% (the watch's own threshold is 30)
 pebble send-app-message --emulator flint --vnc --int 10006=28 10000=600
 
@@ -198,17 +201,20 @@ watchface-analog/
     wire.{c,h}          The AppMessage inbox and the two watchdogs
     wbatt.{c,h}         The watch's own hours-remaining estimate
     wx.{c,h}            The weather table, its persistence, the slot's pick
-    wxglyph.{c,h}       The weather icons
+    wxglyph.{c,h}       The weather icons, on the dial and at row size
+    icons.{c,h}         The rows' bitmaps, their mirroring, the roundabout's exit number
   src/pkjs/index.js     PebbleKit JS stub (deliberately does nothing)
-  resources/images/     The launcher icon, and pebble_weather_icons/
+  resources/images/     The launcher icon, pebble_weather_icons/, and icons/ (the rows')
   tools/                grab.py, send-demo-events.py, make-menu-icon.py
 ```
 
-`events.{c,h}`, `wire.{c,h}`, `wbatt.{c,h}`, `wx.{c,h}`, `wxglyph.{c,h}`, `tools/grab.py`
-and `tools/send-demo-events.py` are shared with `watchface-digital/` by **copy, not by
-reference** (`tools/make-menu-icon.py` is not — it draws this face's own icon).
-`wxglyph` is the one copied file that draws anything, and it draws with nothing but the
-SDK, so neither face can draw a storm its own way. The rest
+`events.{c,h}`, `wire.{c,h}`, `wbatt.{c,h}`, `wx.{c,h}`, `wxglyph.{c,h}`, `icons.{c,h}`,
+`tools/grab.py` and `tools/send-demo-events.py` are shared with `watchface-digital/` by
+**copy, not by reference** (`tools/make-menu-icon.py` is not — it draws this face's own
+icon). `wxglyph` and `icons` are the copied files that draw anything, and they draw
+bitmaps both faces carry under the same resource names, so neither face can draw a storm
+or a turn its own way; the rows' files differ in size between the faces, because the
+rows do. The rest
 carry no rendering knowledge, so the copies stay identical except for the window
 constants — this face's
 `RING_BACK_S`/`RING_AHEAD_S` are 1 h and 11 h against the digital face's 1 h and 3 h —
@@ -216,16 +222,42 @@ and `SLOT_FAR_S` in `events.c`, which on this face stops at 5 h rather than foll
 the ring, because the countdown carries a single digit of hours.
 A fix to the decoder or the battery estimate belongs in both.
 
-**Two kinds of image resource: the launcher icon, and the weather icons.** The weather icons
-are 12 px pixel art in two sets — `bw/` for `flint`, `color/` for `emery` and `gabbro`,
-declared under one name each (`WX_RAIN`, …) the way `MENU_ICON` is — and are drawn at
-1:1, because pixel art does not survive scaling. Every other glyph the *face* draws is
-drawn from primitives or a normalised point table, so it stays crisp at three sizes and
-costs nothing from the resource budget. The icon in the watchface selector cannot be:
-the firmware draws that list, not the app, so the shape has to exist as a bitmap before
-the app runs. `tools/make-menu-icon.py` draws it from the same primitives anyway and
-writes `resources/images/`, so the source of truth is still code - see *The launcher
-icon* below.
+**Three kinds of image resource: the launcher icon, the weather icons, and the rows'
+glyphs.** The dial's weather icons are 12 px pixel art in two sets under
+`resources/images/pebble_weather_icons/` — `bw/` for `flint`, `color/` for `emery` and
+`gabbro`, declared under one name each (`WX_RAIN`, …) the way `MENU_ICON` is — drawn at
+1:1 and carried file for file by the other face. The dial itself — rail, ticks, bands,
+wedges, hands — is drawn from primitives. The icon in the watchface selector is a bitmap
+because the firmware draws that list, not the app; `tools/make-menu-icon.py` draws it in
+code and writes `resources/images/`, so its source of truth is the script - see *The
+launcher icon* below.
+
+The rows' glyphs are hand-drawn bitmaps under `resources/images/icons/<platform>/slot/`,
+one file per glyph per display, each exactly the size of the glyph box that display's
+row lays out (the number is in the file name):
+
+| Glyph box | `flint` | `emery` | `gabbro` |
+| --- | --- | --- | --- |
+| countdown | 15 | 15 | 15 |
+| nav, warnings | 14 | 19 | 21 |
+
+`icons.{c,h}` draws them — at 1:1, centred in the box, because pixel art does not survive
+scaling — and makes the ones that are not carried:
+
+- **The right turns are the left ones mirrored.** Left and right are absolute, so there
+  is no `nav_*right*` file at all.
+- **The roundabouts and the u-turn are drawn for left-hand traffic** — the roundabout
+  clockwise (`*_cw_*`), the u-turn swinging right — and right-hand traffic, `NavDetail`'s
+  bit 7, draws them mirrored. See `docs/protocol.md`.
+- **The exit number is drawn over the roundabout, never mirrored with it,** centred on
+  the icon. The digits are 3×5 pixel art in `resources/images/icons/nav-digits/`, one set
+  for all three displays, read into a mask once and drawn at 1:1 on `flint` and doubled
+  on the colour displays. Exits 1–9 get one; above that the shape goes alone. The
+  roundabout art leaves the middle of its island clear for it.
+
+The SDK can neither flip nor scale a bitmap, so both are done on the pixels: the mirror
+is a copy made once and cached, in the source's own format and palette. It was checked
+pixel-exact on `emery` and `flint` against palettised art of two to six colours.
 
 **Two font roles, not the digital face's four, and both are system fonts.** There is no
 clock numeral here - the hands are the clock - so the digital face's LECO ladder is not
@@ -463,12 +495,13 @@ Each of these was tried the other way first.
   gap pays that back. Half and not none, because at no gap a *task* countdown put the
   blunt wedge hard against the minus, and a solid triangle followed by a horizontal bar
   is a maneuver arrow — which is what the row below draws.
-- **The notification glyphs get a three-pixel stroke from 14 px, where the floor used
-  to be 16 and flint never reached it.** flint's band glyph was 13 px under the Rajdhani
-  resources and is 14 under Gothic, so the one display that most needs the weight was
-  the one not getting it. That was survivable beside a condensed semibold TTF rasterised
-  light; beside a system Gothic Bold a hairline maneuver reads as a different kind of
-  mark from the number it qualifies. See `glyph_stroke` in `slots.c`.
+- **The notification glyphs are bitmaps, where the rest of the face is drawn.** They
+  were drawn from primitives — stroke floors, a maneuver grid, a head tuned against its
+  shaft — and are hand-drawn pixel art now, every pixel chosen at each display's exact
+  size. The price is a file per glyph per display, and a glyph box that must not change size
+  without the art changing with it: **re-measure the rows' glyph box after any change to
+  the slot font, the disc's rows or the band,** and redraw at the new size. One case
+  draws smaller than its art: `slot_layout()` shrinking the glyph to fit, below.
 - **`slot_layout()` shrinks the glyph before it stacks the row.** The glyph is the
   qualifier and the number is the reading, so the glyph gives way first — and a row
   that keeps its shape keeps its alignment with the one opposite it. Stacking is the

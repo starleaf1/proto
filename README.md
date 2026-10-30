@@ -60,7 +60,7 @@ carried by shape or depth first, with colour layered on top only where there is 
 | | |
 | --- | --- |
 | App UUIDs | `f2fc68a6-9636-4694-929b-73c11c33f0e4` (digital), `bd9bd299-527e-4236-8206-27be3dc9781c` (analog) |
-| Message keys | `Heartbeat` (`10000`), `CalEvents` (`10001`), `CalFlags` (`10002`), `NavManeuver` (`10003`), `NavDistance` (`10004`), `NavUnit` (`10005`), `PhoneBattery` (`10006`), `WxAlerts` (`10007`) |
+| Message keys | `Heartbeat` (`10000`), `CalEvents` (`10001`), `CalFlags` (`10002`), `NavManeuver` (`10003`), `NavDistance` (`10004`), `NavUnit` (`10005`), `PhoneBattery` (`10006`), `WxAlerts` (`10007`), `NavDetail` (`10008`) |
 | Direction | phone → watch, always |
 
 Calendar entries arrive as a packed byte array: an id, an absolute start time, a

@@ -25,5 +25,10 @@
 
 void wx_glyph(GContext *ctx, GRect box, uint8_t hazard);
 
+// The same hazard at the rows' glyph size, which is each face's own — so these files,
+// unlike the twelve-pixel set, are per face and per display, under
+// resources/images/icons/<platform>/slot/. Drawn through icons.h, at their own size.
+void wx_glyph_slot(GContext *ctx, GRect box, uint8_t hazard);
+
 // Releases the icons, which are loaded on first use and kept. Call from deinit().
 void wx_glyph_deinit(void);

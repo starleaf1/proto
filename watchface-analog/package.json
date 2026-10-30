@@ -28,7 +28,8 @@
       "NavDistance",
       "NavUnit",
       "PhoneBattery",
-      "WxAlerts"
+      "WxAlerts",
+      "NavDetail"
     ],
     "resources": {
       "media": [
@@ -169,6 +170,627 @@
             "emery",
             "gabbro"
           ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_NAV_STRAIGHT",
+          "file": "images/icons/flint/slot/nav_straight_14.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_NAV_STRAIGHT",
+          "file": "images/icons/emery/slot/nav_straight_19.png",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_NAV_STRAIGHT",
+          "file": "images/icons/gabbro/slot/nav_straight_21.png",
+          "targetPlatforms": [
+            "gabbro"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_NAV_LEFT",
+          "file": "images/icons/flint/slot/nav_left_14.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_NAV_LEFT",
+          "file": "images/icons/emery/slot/nav_left_19.png",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_NAV_LEFT",
+          "file": "images/icons/gabbro/slot/nav_left_21.png",
+          "targetPlatforms": [
+            "gabbro"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_NAV_SLIGHT_LEFT",
+          "file": "images/icons/flint/slot/nav_slight_left_14.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_NAV_SLIGHT_LEFT",
+          "file": "images/icons/emery/slot/nav_slight_left_19.png",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_NAV_SLIGHT_LEFT",
+          "file": "images/icons/gabbro/slot/nav_slight_left_21.png",
+          "targetPlatforms": [
+            "gabbro"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_NAV_SHARP_LEFT",
+          "file": "images/icons/flint/slot/nav_sharp_left_14.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_NAV_SHARP_LEFT",
+          "file": "images/icons/emery/slot/nav_sharp_left_19.png",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_NAV_SHARP_LEFT",
+          "file": "images/icons/gabbro/slot/nav_sharp_left_21.png",
+          "targetPlatforms": [
+            "gabbro"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_NAV_UTURN",
+          "file": "images/icons/flint/slot/nav_uturn_14.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_NAV_UTURN",
+          "file": "images/icons/emery/slot/nav_uturn_19.png",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_NAV_UTURN",
+          "file": "images/icons/gabbro/slot/nav_uturn_21.png",
+          "targetPlatforms": [
+            "gabbro"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_NAV_ARRIVE",
+          "file": "images/icons/flint/slot/nav_arrive_14.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_NAV_ARRIVE",
+          "file": "images/icons/emery/slot/nav_arrive_19.png",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_NAV_ARRIVE",
+          "file": "images/icons/gabbro/slot/nav_arrive_21.png",
+          "targetPlatforms": [
+            "gabbro"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_NAV_RB_EARLY",
+          "file": "images/icons/flint/slot/nav_roundabout_early_cw_14.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_NAV_RB_EARLY",
+          "file": "images/icons/emery/slot/nav_roundabout_early_cw_19.png",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_NAV_RB_EARLY",
+          "file": "images/icons/gabbro/slot/nav_roundabout_early_cw_21.png",
+          "targetPlatforms": [
+            "gabbro"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_NAV_RB_MIDDLE",
+          "file": "images/icons/flint/slot/nav_roundabout_middle_cw_14.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_NAV_RB_MIDDLE",
+          "file": "images/icons/emery/slot/nav_roundabout_middle_cw_19.png",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_NAV_RB_MIDDLE",
+          "file": "images/icons/gabbro/slot/nav_roundabout_middle_cw_21.png",
+          "targetPlatforms": [
+            "gabbro"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_NAV_RB_LATE",
+          "file": "images/icons/flint/slot/nav_roundabout_late_cw_14.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_NAV_RB_LATE",
+          "file": "images/icons/emery/slot/nav_roundabout_late_cw_19.png",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_NAV_RB_LATE",
+          "file": "images/icons/gabbro/slot/nav_roundabout_late_cw_21.png",
+          "targetPlatforms": [
+            "gabbro"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_NAV_RB_LAP",
+          "file": "images/icons/flint/slot/nav_roundabout_lap_cw_14.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_NAV_RB_LAP",
+          "file": "images/icons/emery/slot/nav_roundabout_lap_cw_19.png",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_NAV_RB_LAP",
+          "file": "images/icons/gabbro/slot/nav_roundabout_lap_cw_21.png",
+          "targetPlatforms": [
+            "gabbro"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_NAV_RB_UNKNOWN",
+          "file": "images/icons/flint/slot/nav_roundabout_unknown_cw_14.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_NAV_RB_UNKNOWN",
+          "file": "images/icons/emery/slot/nav_roundabout_unknown_cw_19.png",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_NAV_RB_UNKNOWN",
+          "file": "images/icons/gabbro/slot/nav_roundabout_unknown_cw_21.png",
+          "targetPlatforms": [
+            "gabbro"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_COUNT_APPOINTMENT",
+          "file": "images/icons/flint/slot/count_appointment_15.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_COUNT_APPOINTMENT",
+          "file": "images/icons/emery/slot/count_appointment_15.png",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_COUNT_APPOINTMENT",
+          "file": "images/icons/gabbro/slot/count_appointment_15.png",
+          "targetPlatforms": [
+            "gabbro"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_COUNT_TASK",
+          "file": "images/icons/flint/slot/count_task_15.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_COUNT_TASK",
+          "file": "images/icons/emery/slot/count_task_15.png",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_COUNT_TASK",
+          "file": "images/icons/gabbro/slot/count_task_15.png",
+          "targetPlatforms": [
+            "gabbro"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_COUNT_RUNNING",
+          "file": "images/icons/flint/slot/count_running_15.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_COUNT_RUNNING",
+          "file": "images/icons/emery/slot/count_running_15.png",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_COUNT_RUNNING",
+          "file": "images/icons/gabbro/slot/count_running_15.png",
+          "targetPlatforms": [
+            "gabbro"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_WARN_PHONE_DOWN",
+          "file": "images/icons/flint/slot/warn_phone_disconnected_14.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_WARN_PHONE_DOWN",
+          "file": "images/icons/emery/slot/warn_phone_disconnected_19.png",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_WARN_PHONE_DOWN",
+          "file": "images/icons/gabbro/slot/warn_phone_disconnected_21.png",
+          "targetPlatforms": [
+            "gabbro"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_WARN_PHONE_BATTERY",
+          "file": "images/icons/flint/slot/warn_phone_battery_14.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_WARN_PHONE_BATTERY",
+          "file": "images/icons/emery/slot/warn_phone_battery_19.png",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_WARN_PHONE_BATTERY",
+          "file": "images/icons/gabbro/slot/warn_phone_battery_21.png",
+          "targetPlatforms": [
+            "gabbro"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_WARN_WATCH_BATTERY",
+          "file": "images/icons/flint/slot/warn_watch_battery_14.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_WARN_WATCH_BATTERY",
+          "file": "images/icons/emery/slot/warn_watch_battery_19.png",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_WARN_WATCH_BATTERY",
+          "file": "images/icons/gabbro/slot/warn_watch_battery_21.png",
+          "targetPlatforms": [
+            "gabbro"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_SLOT_RAIN",
+          "file": "images/icons/flint/slot/wx_rain_14.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_SLOT_RAIN",
+          "file": "images/icons/emery/slot/wx_rain_19.png",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_SLOT_RAIN",
+          "file": "images/icons/gabbro/slot/wx_rain_21.png",
+          "targetPlatforms": [
+            "gabbro"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_SLOT_THUNDER",
+          "file": "images/icons/flint/slot/wx_thunderstorm_14.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_SLOT_THUNDER",
+          "file": "images/icons/emery/slot/wx_thunderstorm_19.png",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_SLOT_THUNDER",
+          "file": "images/icons/gabbro/slot/wx_thunderstorm_21.png",
+          "targetPlatforms": [
+            "gabbro"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_SLOT_SNOW",
+          "file": "images/icons/flint/slot/wx_snow_14.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_SLOT_SNOW",
+          "file": "images/icons/emery/slot/wx_snow_19.png",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_SLOT_SNOW",
+          "file": "images/icons/gabbro/slot/wx_snow_21.png",
+          "targetPlatforms": [
+            "gabbro"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_SLOT_HEAT",
+          "file": "images/icons/flint/slot/wx_heat_14.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_SLOT_HEAT",
+          "file": "images/icons/emery/slot/wx_heat_19.png",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_SLOT_HEAT",
+          "file": "images/icons/gabbro/slot/wx_heat_21.png",
+          "targetPlatforms": [
+            "gabbro"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_SLOT_WIND",
+          "file": "images/icons/flint/slot/wx_wind_14.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_SLOT_WIND",
+          "file": "images/icons/emery/slot/wx_wind_19.png",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_SLOT_WIND",
+          "file": "images/icons/gabbro/slot/wx_wind_21.png",
+          "targetPlatforms": [
+            "gabbro"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_SLOT_HAIL",
+          "file": "images/icons/flint/slot/wx_hail_14.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_SLOT_HAIL",
+          "file": "images/icons/emery/slot/wx_hail_19.png",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_SLOT_HAIL",
+          "file": "images/icons/gabbro/slot/wx_hail_21.png",
+          "targetPlatforms": [
+            "gabbro"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_SLOT_OTHER",
+          "file": "images/icons/flint/slot/wx_other_severe_14.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_SLOT_OTHER",
+          "file": "images/icons/emery/slot/wx_other_severe_19.png",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "WX_SLOT_OTHER",
+          "file": "images/icons/gabbro/slot/wx_other_severe_21.png",
+          "targetPlatforms": [
+            "gabbro"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_DIGIT_1",
+          "file": "images/icons/nav-digits/digit_1.png"
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_DIGIT_2",
+          "file": "images/icons/nav-digits/digit_2.png"
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_DIGIT_3",
+          "file": "images/icons/nav-digits/digit_3.png"
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_DIGIT_4",
+          "file": "images/icons/nav-digits/digit_4.png"
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_DIGIT_5",
+          "file": "images/icons/nav-digits/digit_5.png"
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_DIGIT_6",
+          "file": "images/icons/nav-digits/digit_6.png"
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_DIGIT_7",
+          "file": "images/icons/nav-digits/digit_7.png"
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_DIGIT_8",
+          "file": "images/icons/nav-digits/digit_8.png"
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_DIGIT_9",
+          "file": "images/icons/nav-digits/digit_9.png"
         }
       ]
     },

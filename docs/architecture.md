@@ -23,10 +23,10 @@ companion that feeds them both:
 The two faces are independent apps with their own UUIDs, built and installed separately.
 They share the protocol and a design vocabulary — an appointment is a band, a task is a
 blunt wedge, a running thing is twice the depth of an upcoming one, red is spent on now
-— and no code that knows about pixels, bar one file. The modules that do not (`events`,
-`wire`, `wbatt`, `wx`) exist in both by copy, and so does `wxglyph`, which draws the
-weather icons — bitmaps both faces carry under the same names — so neither face can draw
-them its own way.
+— and no code that knows about pixels, bar two files. The modules that do not (`events`,
+`wire`, `wbatt`, `wx`) exist in both by copy, and so do `wxglyph` and `icons`, which draw
+the weather icons and the rows' hand-drawn glyphs — bitmaps both faces carry under the
+same names — so neither face can draw them its own way.
 
 The dividing line: **the phone decides meaning, the watch decides pixels.** The
 companion resolves which entries exist, when they start, how long they run, and
@@ -114,11 +114,12 @@ One window, one layer, one update proc, split across nine small modules.
 | `theme.h` | The whole palette and the four system-font choices. |
 | `events.{c,h}` | The event table, the live window, the linger rules, and which entry the countdown should show. |
 | `strip.{c,h}` | Bands, notches, markers, the pointer, and weather glyphs in the hour-label lane. |
-| `slots.{c,h}` | The three conditional rows, and every glyph. |
+| `slots.{c,h}` | The three conditional rows, and which glyph each one shows. |
 | `wire.{c,h}` | The AppMessage inbox and the two watchdogs. |
 | `wbatt.{c,h}` | The watch's own hours-remaining estimate. |
 | `wx.{c,h}` | The weather table, its persistence, and which alert the slot shows. |
-| `wxglyph.{c,h}` | The weather icons, 12 px bitmaps, plus a drawn mark for ice and the unknown. |
+| `wxglyph.{c,h}` | The weather icons: 12 px bitmaps on the strip, and the rows' size in the slot. |
+| `icons.{c,h}` | The rows' hand-drawn bitmaps, mirrored where not carried, and the roundabout's exit number. |
 
 **The track** is the one abstraction the renderer needs. `track_at(lo, u)` maps a
 position in the visible window — seconds from its top — to a point on the boundary plus
@@ -188,12 +189,13 @@ One window, one layer, one update proc, split across the same shape of module se
 | `geometry.{c,h}` | The radial ladder, the angle mapping, the disc's rows. |
 | `theme.h` | The palette and the two system-font choices. |
 | `events.{c,h}` | The event table, the live window, linger rules, countdown choice. |
-| `slots.{c,h}` | The countdown and the two notification pairs, and every glyph. |
+| `slots.{c,h}` | The countdown and the two notification pairs, and which glyph each shows. |
 | `wire.{c,h}` | The AppMessage inbox and the two watchdogs. |
 | `wbatt.{c,h}` | The watch's own hours-remaining estimate. |
 | `wx.{c,h}` / `wxglyph.{c,h}` | The weather table, and the weather icons. |
+| `icons.{c,h}` | The rows' hand-drawn bitmaps, as on the digital face. |
 
-`events`, `wire`, `wbatt`, `wx` and `wxglyph` are the digital face's files, copied. They carry no
+`events`, `wire`, `wbatt`, `wx`, `wxglyph` and `icons` are the digital face's files, copied. They carry no
 rendering knowledge, and they only *read* the window constants rather than defining
 them — which is what lets the two windows differ without the copies drifting. It is
 1 h and 11 h here; there it is 1 h and 3 h on the rectangles and 1.5 h and 3.5 h on

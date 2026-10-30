@@ -59,6 +59,7 @@ static uint32_t  s_hb_grace_ms = 0;
 static int       s_nav_man = NAV_NONE;
 static int       s_nav_dist = 0;
 static int       s_nav_unit = NAV_UNIT_M;
+static int32_t   s_nav_detail = 0;
 static AppTimer *s_nav_timer = NULL;
 
 static int       s_phone_batt = -1;
@@ -226,6 +227,11 @@ static bool handle_nav(DictionaryIterator *iter) {
     int32_t uv = u->value->int32;
     s_nav_unit = (uv >= NAV_UNIT_M && uv <= NAV_UNIT_MAX) ? (int)uv : NAV_UNIT_M;
   }
+
+  // Not kept from the last message: a maneuver without its detail has none. The exit
+  // under one turn is not the exit under the next.
+  Tuple *x = dict_find(iter, MESSAGE_KEY_NavDetail);
+  s_nav_detail = x ? x->value->int32 : 0;
   nav_sync();
   return true;
 }
@@ -289,6 +295,13 @@ bool wire_nav_active(void)      { return s_nav_man != NAV_NONE; }
 int  wire_nav_maneuver(void)    { return s_nav_man; }
 int  wire_nav_distance(void)    { return s_nav_dist; }
 int  wire_nav_unit(void)        { return s_nav_unit; }
+int  wire_nav_exit(void)        { return (int)(s_nav_detail & 0xF); }
+bool wire_nav_right_hand(void)  { return (s_nav_detail >> 7) & 1; }
+
+int wire_nav_roundabout(void) {
+  int rb = (int)((s_nav_detail >> 4) & 0x7);
+  return rb <= NAV_RB_MAX ? rb : NAV_RB_UNKNOWN;
+}
 int  wire_phone_battery(void)   { return s_phone_batt; }
 
 void wire_init(void (*on_change)(void)) {

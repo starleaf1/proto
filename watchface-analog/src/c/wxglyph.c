@@ -1,4 +1,5 @@
 #include "wxglyph.h"
+#include "icons.h"
 #include "wx.h"
 
 // Loaded on first use and kept for the life of the app: a paint draws up to eight
@@ -22,6 +23,24 @@ static uint32_t resource_for(int slot) {
     // face says so without claiming to know what.
     default:         return RESOURCE_ID_WX_OTHER;
   }
+}
+
+// The slot set, folded the same way as resource_for().
+static uint32_t slot_resource_for(int slot) {
+  switch (slot) {
+    case WX_THUNDER: return RESOURCE_ID_WX_SLOT_THUNDER;
+    case WX_RAIN:    return RESOURCE_ID_WX_SLOT_RAIN;
+    case WX_SNOW:    return RESOURCE_ID_WX_SLOT_SNOW;
+    case WX_ICE:     return RESOURCE_ID_WX_SLOT_HAIL;
+    case WX_GUSTS:   return RESOURCE_ID_WX_SLOT_WIND;
+    case WX_HEAT:    return RESOURCE_ID_WX_SLOT_HEAT;
+    default:         return RESOURCE_ID_WX_SLOT_OTHER;
+  }
+}
+
+void wx_glyph_slot(GContext *ctx, GRect box, uint8_t hazard) {
+  int slot = (hazard >= 1 && hazard <= WX_HAZARD_MAX) ? hazard : ICON_UNKNOWN;
+  icon_draw(ctx, box, slot_resource_for(slot), false);
 }
 
 void wx_glyph(GContext *ctx, GRect box, uint8_t hazard) {
