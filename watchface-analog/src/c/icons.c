@@ -18,9 +18,15 @@ typedef struct {
 static Cached s_cache[CACHE_N];
 static int s_next;
 
-// One bit per pixel, row-major, set where the digit has ink.
-static uint16_t s_digit[10];
-static bool s_digit_loaded[10];
+// A digit as one byte per row, bit x set where column x has ink, and its size. The size
+// is the bitmap's own: 3 x 5 on flint, 5 x 7 on the colour displays.
+typedef struct {
+  uint8_t rows[ICON_DIGIT_MAX_H];
+  uint8_t w, h;
+  bool loaded;
+} Digit;
+
+static Digit s_digit[10];
 
 // ---------------------------------------------------------------------------
 // Pixel access
@@ -158,24 +164,25 @@ static const uint32_t DIGIT_RES[10] = {
   RESOURCE_ID_ICON_DIGIT_7, RESOURCE_ID_ICON_DIGIT_8, RESOURCE_ID_ICON_DIGIT_9,
 };
 
-// Read once into a mask and the bitmap let go: fifteen bits is all a digit is, and a
-// mask can be drawn at any whole scale and in any ink, which a bitmap cannot.
-static uint16_t digit_mask(int d) {
-  if (s_digit_loaded[d]) return s_digit[d];
-  uint16_t m = 0;
+// Read once into a mask and the bitmap let go: a few bytes is all a digit is, and a
+// mask can be drawn at any whole scale and in any ink, which a bitmap cannot. Art
+// larger than the mask holds is cut to it rather than read past it.
+static const Digit *digit_get(int d) {
+  Digit *g = &s_digit[d];
+  if (g->loaded) return g;
+  *g = (Digit){ .loaded = true };
   GBitmap *b = gbitmap_create_with_resource(DIGIT_RES[d]);
-  if (b) {
-    GSize sz = gbitmap_get_bounds(b).size;
-    for (int y = 0; y < ICON_DIGIT_H && y < sz.h; y++) {
-      for (int x = 0; x < ICON_DIGIT_W && x < sz.w; x++) {
-        if (px_inked(b, x, y)) m |= (uint16_t)(1 << (y * ICON_DIGIT_W + x));
-      }
+  if (!b) return g;
+  GSize sz = gbitmap_get_bounds(b).size;
+  g->w = (uint8_t)(sz.w < ICON_DIGIT_MAX_W ? sz.w : ICON_DIGIT_MAX_W);
+  g->h = (uint8_t)(sz.h < ICON_DIGIT_MAX_H ? sz.h : ICON_DIGIT_MAX_H);
+  for (int y = 0; y < g->h; y++) {
+    for (int x = 0; x < g->w; x++) {
+      if (px_inked(b, x, y)) g->rows[y] |= (uint8_t)(1 << x);
     }
-    gbitmap_destroy(b);
   }
-  s_digit[d] = m;
-  s_digit_loaded[d] = true;
-  return m;
+  gbitmap_destroy(b);
+  return g;
 }
 
 // Centred on `c`, which is the icon's own centre: the artwork leaves the middle of
@@ -183,14 +190,14 @@ static uint16_t digit_mask(int d) {
 // island at these sizes, and the shape still says which way to go without it.
 static void draw_digit(GContext *ctx, GPoint c, int d, GColor ink) {
   if (d < 1 || d > 9) return;
-  uint16_t m = digit_mask(d);
+  const Digit *g = digit_get(d);
   int k = ICON_DIGIT_SCALE;
-  int x0 = c.x - ICON_DIGIT_W * k / 2;
-  int y0 = c.y - ICON_DIGIT_H * k / 2;
+  int x0 = c.x - g->w * k / 2;
+  int y0 = c.y - g->h * k / 2;
   graphics_context_set_fill_color(ctx, ink);
-  for (int y = 0; y < ICON_DIGIT_H; y++) {
-    for (int x = 0; x < ICON_DIGIT_W; x++) {
-      if (m & (1 << (y * ICON_DIGIT_W + x))) {
+  for (int y = 0; y < g->h; y++) {
+    for (int x = 0; x < g->w; x++) {
+      if (g->rows[y] & (1 << x)) {
         graphics_fill_rect(ctx, GRect(x0 + x * k, y0 + y * k, k, k), 0, GCornerNone);
       }
     }

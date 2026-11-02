@@ -248,9 +248,11 @@ scaling — and makes the ones that are not carried:
   clockwise (`*_cw_*`), the u-turn swinging right — and right-hand traffic, `NavDetail`'s
   bit 7, draws them mirrored. See `docs/protocol.md`.
 - **The exit number is drawn over the roundabout, never mirrored with it,** centred on
-  the icon. The digits are 3×5 pixel art in `resources/images/icons/nav-digits/`, one set
-  for all three displays, read into a mask once and drawn at 1:1 on `flint` and doubled
-  on the colour displays. Exits 1–9 get one; above that the shape goes alone. The
+  the icon. The digits are pixel art under one resource name each, read into a mask once
+  and drawn at 1:1: 3×5 in `resources/images/icons/nav-digits/` on `flint`, the most its
+  thick ring holds, and 5×7 in `resources/images/icons/nav-digits-5x7/` on the colour
+  displays, which the colour art's 9 px island holds with a pixel to spare. The 3×5 set
+  doubled was tried there first; it filled the island and landed on the route around it. Exits 1–9 get one; above that the shape goes alone. The
   roundabout art leaves the middle of its island clear for it.
 
 The SDK can neither flip nor scale a bitmap, so both are done on the pixels: the mirror

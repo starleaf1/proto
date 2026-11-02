@@ -18,12 +18,16 @@
 // with them.
 // ---------------------------------------------------------------------------
 
-// The digits are 3 x 5 pixel art, drawn at 1:1 on flint and doubled on the colour
-// displays, where 5 px beside a 24 px row is a speck. Doubling is a whole-pixel scale
-// and keeps the art crisp, which no other factor would.
-#define ICON_DIGIT_W 3
-#define ICON_DIGIT_H 5
-#define ICON_DIGIT_SCALE PBL_IF_COLOR_ELSE(2, 1)
+// The digits are pixel art drawn at 1:1, and their size is the bitmap's own: 3 x 5 on
+// flint, which is all that fits inside that display's thick ring, and 5 x 7 on the
+// colour displays, which fits the colour art's island with a pixel to spare except at
+// its diagonals. The colour set was the flint one doubled first, and ten pixels of
+// digit landed on the route drawn around the island, so the icon read as a crosshair.
+// The scale stays a constant, and whole, so the art stays crisp if it ever changes.
+// MAX is what the mask holds; larger art is cut to it.
+#define ICON_DIGIT_MAX_W 8
+#define ICON_DIGIT_MAX_H 9
+#define ICON_DIGIT_SCALE 1
 
 // `res` at its own size, centred in `box`, mirrored left for right when asked.
 void icon_draw(GContext *ctx, GRect box, uint32_t res, bool mirror);

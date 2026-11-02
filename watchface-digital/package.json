@@ -750,47 +750,155 @@
         {
           "type": "bitmap",
           "name": "ICON_DIGIT_1",
-          "file": "images/icons/nav-digits/digit_1.png"
+          "file": "images/icons/nav-digits/digit_1.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_DIGIT_1",
+          "file": "images/icons/nav-digits-5x7/digit_1.png",
+          "targetPlatforms": [
+            "emery",
+            "gabbro"
+          ]
         },
         {
           "type": "bitmap",
           "name": "ICON_DIGIT_2",
-          "file": "images/icons/nav-digits/digit_2.png"
+          "file": "images/icons/nav-digits/digit_2.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_DIGIT_2",
+          "file": "images/icons/nav-digits-5x7/digit_2.png",
+          "targetPlatforms": [
+            "emery",
+            "gabbro"
+          ]
         },
         {
           "type": "bitmap",
           "name": "ICON_DIGIT_3",
-          "file": "images/icons/nav-digits/digit_3.png"
+          "file": "images/icons/nav-digits/digit_3.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_DIGIT_3",
+          "file": "images/icons/nav-digits-5x7/digit_3.png",
+          "targetPlatforms": [
+            "emery",
+            "gabbro"
+          ]
         },
         {
           "type": "bitmap",
           "name": "ICON_DIGIT_4",
-          "file": "images/icons/nav-digits/digit_4.png"
+          "file": "images/icons/nav-digits/digit_4.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_DIGIT_4",
+          "file": "images/icons/nav-digits-5x7/digit_4.png",
+          "targetPlatforms": [
+            "emery",
+            "gabbro"
+          ]
         },
         {
           "type": "bitmap",
           "name": "ICON_DIGIT_5",
-          "file": "images/icons/nav-digits/digit_5.png"
+          "file": "images/icons/nav-digits/digit_5.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_DIGIT_5",
+          "file": "images/icons/nav-digits-5x7/digit_5.png",
+          "targetPlatforms": [
+            "emery",
+            "gabbro"
+          ]
         },
         {
           "type": "bitmap",
           "name": "ICON_DIGIT_6",
-          "file": "images/icons/nav-digits/digit_6.png"
+          "file": "images/icons/nav-digits/digit_6.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_DIGIT_6",
+          "file": "images/icons/nav-digits-5x7/digit_6.png",
+          "targetPlatforms": [
+            "emery",
+            "gabbro"
+          ]
         },
         {
           "type": "bitmap",
           "name": "ICON_DIGIT_7",
-          "file": "images/icons/nav-digits/digit_7.png"
+          "file": "images/icons/nav-digits/digit_7.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_DIGIT_7",
+          "file": "images/icons/nav-digits-5x7/digit_7.png",
+          "targetPlatforms": [
+            "emery",
+            "gabbro"
+          ]
         },
         {
           "type": "bitmap",
           "name": "ICON_DIGIT_8",
-          "file": "images/icons/nav-digits/digit_8.png"
+          "file": "images/icons/nav-digits/digit_8.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_DIGIT_8",
+          "file": "images/icons/nav-digits-5x7/digit_8.png",
+          "targetPlatforms": [
+            "emery",
+            "gabbro"
+          ]
         },
         {
           "type": "bitmap",
           "name": "ICON_DIGIT_9",
-          "file": "images/icons/nav-digits/digit_9.png"
+          "file": "images/icons/nav-digits/digit_9.png",
+          "targetPlatforms": [
+            "flint"
+          ]
+        },
+        {
+          "type": "bitmap",
+          "name": "ICON_DIGIT_9",
+          "file": "images/icons/nav-digits-5x7/digit_9.png",
+          "targetPlatforms": [
+            "emery",
+            "gabbro"
+          ]
         }
       ]
     },
