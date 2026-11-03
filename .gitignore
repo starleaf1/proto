@@ -7,6 +7,9 @@
 # glob covers both faces, and any third.
 watchface-*/build/
 watchface-*/.lock-waf_linux_build
+# Stale output from before the split into -digital/-analog. The lock file
+# records the shell environment, secrets included.
+watchface/
 *.pbw
 
 # --- Android companion (pipe/) ---
